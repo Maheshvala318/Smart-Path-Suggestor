@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Smart Path Suggestor</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0a0a0a;
+      color: #ffffff;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 12px;
+      touch-action: manipulation;
+    }
+
+    h1 {
+      font-size: 1.1em;
+      color: #4ade80;
+      letter-spacing: 1px;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+    }
+
+    /* Camera preview */
+    #video {
+      width: 100%;
+      max-width: 480px;
+      border-radius: 12px;
+      border: 2px solid #1f2937;
+      background: #111;
+    }
+
+    /* Hidden canvas used for frame capture */
+    #canvas { display: none; }
+
+    /* Status message box — shows what the AI says */
+    #status-box {
+      width: 100%;
+      max-width: 480px;
+      margin-top: 12px;
+      padding: 16px;
+      border-radius: 12px;
+      background: #111827;
+      border: 2px solid #1f2937;
+      min-height: 70px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #status-text {
+      font-size: 1.3em;
+      font-weight: 600;
+      text-align: center;
+      line-height: 1.4;
+      color: #4ade80;
+      transition: color 0.3s;
+    }
+
+    #status-text.danger  { color: #ef4444; }
+    #status-text.warning { color: #f59e0b; }
+    #status-text.clear   { color: #4ade80; }
+    #status-text.idle    { color: #6b7280; }
+
+    /* Zone display */
+    #zones {
+      width: 100%;
+      max-width: 480px;
+      margin-top: 10px;
+      display: flex;
+      gap: 6px;
+    }
+
+    .zone-block {
+      flex: 1;
+      padding: 10px 4px;
+      border-radius: 8px;
+      background: #111827;
+      border: 1px solid #1f2937;
+      text-align: center;
+      font-size: 0.75em;
+      color: #9ca3af;
+    }
+
+    .zone-block .zone-label { font-size: 0.85em; margin-bottom: 4px; color: #6b7280; }
+    .zone-block .zone-risk  { font-size: 1.2em; font-weight: bold; }
+    .zone-block.safe   { border-color: #4ade80; background: #052e16; }
+    .zone-block.medium { border-color: #f59e0b; background: #1c1205; }
+    .zone-block.danger { border-color: #ef4444; background: #1c0505; }
+
+    /* Detections list */
+    #detections {
+      width: 100%;
+      max-width: 480px;
+      margin-top: 10px;
+    }
+
+    .det-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 7px 12px;
+      margin-bottom: 4px;
+      border-radius: 8px;
+      background: #111827;
+      font-size: 0.82em;
+      border-left: 3px solid #1f2937;
+    }
+
+    .det-row.det-danger  { border-left-color: #ef4444; }
+    .det-row.det-warning { border-left-color: #f59e0b; }
+    .det-row.det-ok      { border-left-color: #4ade80; }
+
+    .det-label { font-weight: 600; text-transform: capitalize; color: #e5e7eb; }
+    .det-dist  { color: #9ca3af; }
+    .det-zone  { color: #6b7280; font-size: 0.9em; }
+
+    /* Control buttons */
+    #controls {
+      width: 100%;
+      max-width: 480px;
+      margin-top: 12px;
+      display: flex;
+      gap: 8px;
+    }
+
+    button {
+      flex: 1;
+      padding: 14px;
+      border: none;
+      border-radius: 10px;
+      font-size: 1em;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+
+    button:active { opacity: 0.7; }
+
+    #btn-start  { background: #16a34a; color: white; }
+    #btn-stop   { background: #dc2626; color: white; }
+    #btn-mute   { background: #374151; color: #d1d5db; }
+    #btn-mute.muted { background: #1f2937; color: #6b7280; }
+
+    /* Stats bar */
+    #stats {
+      width: 100%;
+      max-width: 480px;
+      margin-top: 8px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.72em;
+      color: #4b5563;
+      padding: 0 4px;
+    }
+
+    #connection-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #6b7280;
+      margin-right: 5px;
+    }
+
+    #connection-dot.connected    { background: #4ade80; }
+    #connection-dot.disconnected { background: #ef4444; }
+  </style>
+</head>
+<body>
+
+  <h1>🦯 Smart Path Suggestor</h1>
+
+  <!-- Live camera preview -->
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="canvas"></canvas>
+
+  <!-- AI voice message -->
+  <div id="status-box">
+    <div id="status-text" class="idle">Tap START to begin navigation</div>
+  </div>
+
+  <!-- Zone risk display -->
+  <div id="zones">
+    <div class="zone-block" id="zone-left">
+      <div class="zone-label">LEFT</div>
+      <div class="zone-risk" id="risk-left">—</div>
+    </div>
+    <div class="zone-block" id="zone-center">
+      <div class="zone-label">CENTER</div>
+      <div class="zone-risk" id="risk-center">—</div>
+    </div>
+    <div class="zone-block" id="zone-right">
+      <div class="zone-label">RIGHT</div>
+      <div class="zone-risk" id="risk-right">—</div>
+    </div>
+  </div>
+
+  <!-- Detected objects list -->
+  <div id="detections"></div>
+
+  <!-- Control buttons -->
+  <div id="controls">
+    <button id="btn-start" onclick="startDetection()">▶ START</button>
+    <button id="btn-stop"  onclick="stopDetection()">■ STOP</button>
+    <button id="btn-mute"  onclick="toggleMute()">🔊 VOICE</button>
+  </div>
+
+  <!-- Stats bar -->
+  <div id="stats">
+    <span>
+      <span id="connection-dot" class="disconnected"></span>
+      <span id="conn-status">Not connected</span>
+    </span>
+    <span id="latency-display">Latency: —</span>
+    <span id="fps-display">0 req/s</span>
+  </div>
+
+  <script>
+    // ─────────────────────────────────────────────
+    //  CONFIGURATION
+    // ─────────────────────────────────────────────
+
+    // ⚠️  CHANGE THIS to your laptop's IP address
+    // Find it:  Windows → ipconfig   |   Mac/Linux → ifconfig
+    const SERVER_URL = window.location.origin;   // Auto-uses same IP as page was served from
+
+    const DETECT_INTERVAL_MS  = 500;   // Send frame every 500ms (2 detections/sec)
+    const JPEG_QUALITY        = 0.65;  // Lower = faster upload, less detail
+    const CAPTURE_WIDTH       = 320;   // Resize before sending (saves bandwidth)
+    const CAPTURE_HEIGHT      = 240;
+
+    // ─────────────────────────────────────────────
+    //  STATE VARIABLES
+    // ─────────────────────────────────────────────
+
+    let isRunning      = false;
+    let isMuted        = false;
+    let intervalId     = null;
+    let lastSpeakTime  = 0;
+    let reqCount       = 0;
+    let reqWindowStart = Date.now();
+    let isSpeaking     = false;
+
+    const video  = document.getElementById("video");
+    const canvas = document.getElementById("canvas");
+    const ctx    = canvas.getContext("2d");
+    const synth  = window.speechSynthesis;
+
+    // ─────────────────────────────────────────────
+    //  CAMERA INITIALISATION
+    // ─────────────────────────────────────────────
+
+    async function startCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: "environment",   // Back camera (rear-facing)
+            width:  { ideal: 640 },
+            height: { ideal: 480 },
+          }
+        });
+        video.srcObject = stream;
+        return true;
+      } catch (err) {
+        updateStatus("Camera error: " + err.message, "danger");
+        return false;
+      }
+    }
+
+    // ─────────────────────────────────────────────
+    //  FRAME CAPTURE
+    // ─────────────────────────────────────────────
+
+    function captureFrame() {
+      canvas.width  = CAPTURE_WIDTH;
+      canvas.height = CAPTURE_HEIGHT;
+      ctx.drawImage(video, 0, 0, CAPTURE_WIDTH, CAPTURE_HEIGHT);
+
+      // Get base64 JPEG — strip the "data:image/jpeg;base64," prefix
+      const dataURL = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
+      return dataURL.split(",")[1];
+    }
+
+    // ─────────────────────────────────────────────
+    //  SEND FRAME TO SERVER
+    // ─────────────────────────────────────────────
+
+    async function sendFrame() {
+      if (!isRunning) return;
+
+      const b64Frame = captureFrame();
+
+      try {
+        const response = await fetch(`${SERVER_URL}/detect`, {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({ image: b64Frame }),
+          signal:  AbortSignal.timeout(3000)   // 3s timeout
+        });
+
+        if (!response.ok) {
+          throw new Error(`Server error ${response.status}`);
+        }
+
+        const data = await response.json();
+        handleResult(data);
+        updateConnectionStatus(true, data.latency_ms);
+
+      } catch (err) {
+        updateConnectionStatus(false);
+        if (err.name !== "TimeoutError") {
+          updateStatus("Server unreachable. Check WiFi.", "danger");
+        }
+      }
+
+      // FPS counter
+      reqCount++;
+      const elapsed = (Date.now() - reqWindowStart) / 1000;
+      if (elapsed >= 3) {
+        document.getElementById("fps-display").textContent =
+          `${(reqCount / elapsed).toFixed(1)} req/s`;
+        reqCount       = 0;
+        reqWindowStart = Date.now();
+      }
+    }
+
+    // ─────────────────────────────────────────────
+    //  HANDLE SERVER RESPONSE
+    // ─────────────────────────────────────────────
+
+    function handleResult(data) {
+      const message    = data.voice_message || "No message";
+      const danger     = data.danger        || false;
+      const zoneRisks  = data.zone_risks    || {};
+      const detections = data.detections    || [];
+
+      // ── Update status message ──────────────────
+      let statusClass = "clear";
+      if (danger)                                        statusClass = "danger";
+      else if (detections.some(d => d.distance_m < 2))  statusClass = "warning";
+      updateStatus(message, statusClass);
+
+      // ── Speak the message (with debounce) ─────
+      speakMessage(message, danger);
+
+      // ── Update zone risk display ───────────────
+      updateZoneDisplay(zoneRisks);
+
+      // ── Update detections list ─────────────────
+      updateDetectionsList(detections);
+    }
+
+    // ─────────────────────────────────────────────
+    //  VOICE OUTPUT
+    // ─────────────────────────────────────────────
+
+    function speakMessage(message, isDanger) {
+      if (isMuted) return;
+      if (isSpeaking && !isDanger) return;   // Don't interrupt unless danger
+
+      const now = Date.now();
+      const minInterval = isDanger ? 1500 : 3500;   // ms between speeches
+
+      if (now - lastSpeakTime < minInterval) return;
+      lastSpeakTime = now;
+
+      synth.cancel();   // Stop any current speech
+
+      const utter = new SpeechSynthesisUtterance(message);
+      utter.rate   = 1.15;    // Slightly faster than normal
+      utter.pitch  = 1.0;
+      utter.volume = 1.0;
+
+      utter.onstart = () => { isSpeaking = true; };
+      utter.onend   = () => { isSpeaking = false; };
+
+      synth.speak(utter);
+    }
+
+    // ─────────────────────────────────────────────
+    //  UI UPDATES
+    // ─────────────────────────────────────────────
+
+    function updateStatus(message, cssClass) {
+      const el = document.getElementById("status-text");
+      el.textContent = message;
+      el.className   = cssClass;
+    }
+
+    function updateZoneDisplay(zoneRisks) {
+      const zones = ["left", "center", "right"];
+
+      zones.forEach(zone => {
+        const risk      = zoneRisks[zone] || 0;
+        const riskEl    = document.getElementById(`risk-${zone}`);
+        const blockEl   = document.getElementById(`zone-${zone}`);
+
+        riskEl.textContent = risk.toFixed(1);
+
+        // Color-code by risk level
+        blockEl.className = "zone-block";
+        if      (risk > 5.0) blockEl.classList.add("danger");
+        else if (risk > 2.0) blockEl.classList.add("medium");
+        else                 blockEl.classList.add("safe");
+      });
+    }
+
+    function updateDetectionsList(detections) {
+      const container = document.getElementById("detections");
+      container.innerHTML = "";
+
+      // Show top 5 detections only
+      const top5 = detections.slice(0, 5);
+
+      top5.forEach(det => {
+        const row = document.createElement("div");
+        row.className = "det-row";
+
+        if      (det.distance_m < 0.8) row.classList.add("det-danger");
+        else if (det.distance_m < 1.5) row.classList.add("det-warning");
+        else                           row.classList.add("det-ok");
+
+        row.innerHTML = `
+          <span class="det-label">${det.label.replace("_", " ")}</span>
+          <span class="det-dist">${det.distance_m.toFixed(1)}m</span>
+          <span class="det-zone">${det.zone}</span>
+        `;
+
+        container.appendChild(row);
+      });
+    }
+
+    function updateConnectionStatus(connected, latency_ms) {
+      const dot    = document.getElementById("connection-dot");
+      const status = document.getElementById("conn-status");
+      const lat    = document.getElementById("latency-display");
+
+      if (connected) {
+        dot.className    = "connected";
+        status.textContent = "Connected";
+        lat.textContent  = `Latency: ${latency_ms}ms`;
+      } else {
+        dot.className    = "disconnected";
+        status.textContent = "Disconnected";
+      }
+    }
+
+    // ─────────────────────────────────────────────
+    //  CONTROL FUNCTIONS
+    // ─────────────────────────────────────────────
+
+    async function startDetection() {
+      if (isRunning) return;
+
+      const cameraOk = await startCamera();
+      if (!cameraOk) return;
+
+      // Small delay to let camera warm up
+      await new Promise(r => setTimeout(r, 800));
+
+      isRunning  = true;
+      intervalId = setInterval(sendFrame, DETECT_INTERVAL_MS);
+
+      updateStatus("Navigation started. Walk carefully.", "clear");
+      speakMessage("Smart Path Suggestor started. Navigation active.", false);
+
+      document.getElementById("btn-start").style.opacity = "0.5";
+      document.getElementById("btn-stop").style.opacity  = "1";
+    }
+
+    function stopDetection() {
+      isRunning = false;
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+
+      synth.cancel();
+      updateStatus("Navigation stopped.", "idle");
+      updateConnectionStatus(false);
+
+      // Reset zones
+      ["left", "center", "right"].forEach(z => {
+        document.getElementById(`risk-${z}`).textContent = "—";
+        document.getElementById(`zone-${z}`).className   = "zone-block";
+      });
+      document.getElementById("detections").innerHTML = "";
+
+      document.getElementById("btn-start").style.opacity = "1";
+      document.getElementById("btn-stop").style.opacity  = "0.5";
+    }
+
+    function toggleMute() {
+      isMuted = !isMuted;
+      const btn = document.getElementById("btn-mute");
+
+      if (isMuted) {
+        synth.cancel();
+        btn.textContent = "🔇 MUTED";
+        btn.classList.add("muted");
+      } else {
+        btn.textContent = "🔊 VOICE";
+        btn.classList.remove("muted");
+      }
+    }
+
+    // ─────────────────────────────────────────────
+    //  SCREEN ALWAYS-ON (prevent sleep during nav)
+    // ─────────────────────────────────────────────
+
+    let wakeLock = null;
+    async function requestWakeLock() {
+      try {
+        wakeLock = await navigator.wakeLock.request("screen");
+      } catch (e) {
+        // WakeLock not supported on all browsers — not critical
+      }
+    }
+    requestWakeLock();
+
+    // Re-acquire wake lock when page becomes visible again
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") requestWakeLock();
+    });
+
+    // ─────────────────────────────────────────────
+    //  INIT
+    // ─────────────────────────────────────────────
+
+    // Auto-start camera preview on load (not detection, just preview)
+    window.addEventListener("load", async () => {
+      await startCamera();
+      updateStatus("Camera ready. Tap START to begin.", "idle");
+    });
+  </script>
+</body>
+</html>
