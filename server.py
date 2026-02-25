@@ -26,6 +26,7 @@ import base64
 import json
 from flask import Flask, request, jsonify, send_file
 from ultralytics import YOLO
+from navigation_engine import NavigationEngine
 
 app = Flask(__name__)
 
@@ -45,12 +46,7 @@ CRITICAL_DISTANCE_M   = 0.8   # critical at 0.8m
 # Minimum YOLO confidence to show a detection
 CONFIDENCE_THRESHOLD  = 0.40
 
-# Zone boundaries (fraction of frame width)
-ZONE_BOUNDARIES = {
-    "left":         (0.00, 0.33),
-    "center":       (0.33, 0.66),
-    "right":        (0.66, 1.00),
-}
+# Zone boundaries — now 5 zones (handled in get_zone())
 
 # Object priority weights for risk scoring (same logic as plan)
 PRIORITY_WEIGHTS = {
@@ -92,6 +88,10 @@ device = torch.device("cpu")
 midas.to(device)
 print("      ✅ MiDaS loaded")
 
+print("[3/3] Loading Navigation Engine...")
+nav_engine = NavigationEngine()
+print("      ✅ Navigation engine loaded")
+
 print("=" * 50)
 print("  ✅ All models ready. Server starting...")
 print("=" * 50)
@@ -114,14 +114,13 @@ def decode_base64_image(b64_string):
 
 
 def get_zone(center_x, frame_width):
-    """Return left / center / right based on object x position"""
+    """Return 5-zone position based on object x position"""
     ratio = center_x / frame_width
-    if ratio < 0.33:
-        return "left"
-    elif ratio < 0.66:
-        return "center"
-    else:
-        return "right"
+    if   ratio < 0.20: return "left"
+    elif ratio < 0.40: return "center_left"
+    elif ratio < 0.60: return "center"
+    elif ratio < 0.80: return "center_right"
+    else:              return "right"
 
 
 def get_vertical_zone(center_y, frame_height):
@@ -135,47 +134,7 @@ def get_vertical_zone(center_y, frame_height):
         return "bottom"
 
 
-def generate_voice_message(detections, zone_risks):
-    """
-    Build a single clear voice message from all detections.
-    Priority: critical danger → moderate warning → clear path
-    """
-    if not detections:
-        return "Path is clear. Walk straight."
-
-    # Sort detections by distance (closest first)
-    sorted_dets = sorted(detections, key=lambda d: d["distance_m"])
-
-    # Check for critical objects
-    critical = [d for d in sorted_dets if d["distance_m"] < CRITICAL_DISTANCE_M]
-    if critical:
-        obj  = critical[0]["label"].replace("_", " ")
-        zone = critical[0]["zone"]
-        dist = critical[0]["distance_m"]
-        if zone == "center":
-            return f"WARNING! {obj} {dist:.1f} meters ahead. Stop!"
-        else:
-            return f"WARNING! {obj} on your {zone}, {dist:.1f} meters. Move away!"
-
-    # Check for nearby objects (danger zone)
-    nearby = [d for d in sorted_dets if d["distance_m"] < DANGER_DISTANCE_M]
-    if nearby:
-        obj  = nearby[0]["label"].replace("_", " ")
-        zone = nearby[0]["zone"]
-        dist = nearby[0]["distance_m"]
-        if zone == "center":
-            return f"{obj} ahead, {dist:.1f} meters. Slow down."
-        else:
-            return f"{obj} on your {zone}, {dist:.1f} meters."
-
-    # Suggest safest direction based on zone risks
-    safest_zone = min(zone_risks, key=zone_risks.get)
-    messages = {
-        "left":   "Move slightly left. Right side is clearer.",
-        "center": "Walk straight. Path ahead is clear.",
-        "right":  "Move slightly right. Left side is clearer.",
-    }
-    return messages.get(safest_zone, "Walk carefully.")
+# generate_voice_message() removed — NavigationEngine handles this now
 
 
 # ─────────────────────────────────────────────
@@ -209,7 +168,13 @@ def run_detection(frame):
     depth_map = prediction.cpu().numpy()
 
     # ── Per-object analysis ───────────────────────────────────
-    zone_risks   = {"left": 0.0, "center": 0.0, "right": 0.0}
+    zone_risks = {
+        "left":         0.0,
+        "center_left":  0.0,
+        "center":       0.0,
+        "center_right": 0.0,
+        "right":        0.0,
+    }
     detections   = []
     danger_found = False
 
@@ -264,16 +229,23 @@ def run_detection(frame):
     # Sort by distance for cleaner output
     detections.sort(key=lambda d: d["distance_m"])
 
-    voice_message = generate_voice_message(detections, zone_risks)
-    latency_ms    = round((time.time() - start_time) * 1000, 1)
+    nav_result = nav_engine.process(detections, zone_risks)
+    latency_ms = round((time.time() - start_time) * 1000, 1)
 
     return {
-        "detections":    detections,
-        "zone_risks":    {k: round(v, 2) for k, v in zone_risks.items()},
-        "danger":        danger_found,
-        "voice_message": voice_message,
-        "latency_ms":    latency_ms,
-        "frame_size":    [w, h],
+        "detections":     detections,
+        "zone_risks":     {k: round(v, 2) for k, v in zone_risks.items()},
+        "danger":         danger_found,
+        "latency_ms":     latency_ms,
+        "frame_size":     [w, h],
+        "voice_message":  nav_result["voice_message"],
+        "priority":       nav_result["priority"],
+        "should_speak":   nav_result["should_speak"],
+        "alert_type":     nav_result["alert_type"],
+        "alert_pattern":  nav_result["alert_pattern"],
+        "alert_duration": nav_result["alert_duration"],
+        "safe_direction": nav_result["safe_direction"],
+        "safe_zone":      nav_result["safe_zone"],
     }
 
 
