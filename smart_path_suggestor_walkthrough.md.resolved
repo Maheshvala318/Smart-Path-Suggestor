@@ -1,0 +1,763 @@
+# 🦯 Smart Path Suggestor — Complete Code Walkthrough
+
+> **Purpose**: A real-time navigation assistant for visually impaired users. It uses a phone's camera to detect obstacles, estimates their distance, and provides **voice guidance + vibration alerts** to suggest the safest walking path.
+
+---
+
+## 📁 Project Structure
+
+| File | Role | Lines |
+|------|------|-------|
+| [server.py](file:///d:/Project/Smart%20Path%20Suggestor/server.py) | Flask API server — receives frames, runs AI models, returns results | 361 |
+| [navigation_engine.py](file:///d:/Project/Smart%20Path%20Suggestor/navigation_engine.py) | Navigation brain — tracking, smoothing, voice messages, alerts | 516 |
+| [mobile_client.html](file:///d:/Project/Smart%20Path%20Suggestor/mobile_client.html) | Mobile web app — camera capture, voice output, vibration | 672 |
+| [detection_local.py](file:///d:/Project/Smart%20Path%20Suggestor/detection_local.py) | Standalone local mode — runs everything on laptop with webcam | 131 |
+| [gen_cert.py](file:///d:/Project/Smart%20Path%20Suggestor/gen_cert.py) | SSL certificate generator for HTTPS (optional) | 45 |
+| [yolov8n.pt](file:///d:/Project/Smart%20Path%20Suggestor/yolov8n.pt) | Pre-trained YOLOv8 nano model weights | — |
+
+---
+
+## 📊 Visual Diagrams
+
+### Basic Workflow
+
+![Smart Path Suggestor — Basic Workflow](workflow_diagram.png)
+
+---
+
+## 🏗️ Architecture Overview
+
+```mermaid
+graph LR
+    A["📱 Mobile Phone<br/>(mobile_client.html)"] -->|"Base64 JPEG<br/>over WiFi"| B["💻 Laptop Server<br/>(server.py)"]
+    B -->|"1. Object Detection"| C["🔍 YOLOv8"]
+    B -->|"2. Depth Estimation"| D["📏 MiDaS"]
+    C --> E["🧠 Navigation Engine<br/>(navigation_engine.py)"]
+    D --> E
+    E -->|"JSON Response"| A
+    A -->|"🔊 Voice + 📳 Vibration"| F["👤 User"]
+```
+
+![Smart Path Suggestor — System Architecture](architecture_diagram.png)
+
+---
+
+## 🔄 Complete Data Flow (Start to Finish)
+
+```mermaid
+sequenceDiagram
+    participant Phone as 📱 Phone Browser
+    participant Server as 💻 server.py
+    participant YOLO as 🔍 YOLOv8
+    participant MiDaS as 📏 MiDaS
+    participant NavEngine as 🧠 NavigationEngine
+
+    Note over Phone: User taps START
+    Phone->>Phone: Open camera (rear-facing)
+    loop Every 500ms
+        Phone->>Phone: Capture frame → Base64 JPEG
+        Phone->>Server: POST /detect {image: "base64..."}
+        Server->>Server: Decode Base64 → OpenCV frame
+        Server->>Server: Resize to 480×360
+        Server->>YOLO: Detect objects
+        YOLO-->>Server: Bounding boxes + labels + confidence
+        Server->>MiDaS: Estimate depth map
+        MiDaS-->>Server: Depth map (relative values)
+        Server->>Server: For each object: zone + distance + risk
+        Server->>NavEngine: process(detections, zone_risks)
+        NavEngine->>NavEngine: Stabilize → Smooth → Prioritize → Message
+        NavEngine-->>Server: voice_message, priority, alerts
+        Server-->>Phone: JSON response
+        Phone->>Phone: Update UI + Speak message + Vibrate
+    end
+```
+
+![Smart Path Suggestor — Complete Data Flow](dataflow_diagram.png)
+
+---
+
+## 📂 File-by-File Walkthrough
+
+---
+
+## 1️⃣ [server.py](file:///d:/Project/Smart%20Path%20Suggestor/server.py) — The API Server
+
+> **What it does**: Runs on the laptop. Loads AI models at startup, exposes a `/detect` endpoint that receives camera frames, runs YOLO + MiDaS, and returns detection results.
+
+### 🚀 Startup — Model Loading
+
+When [server.py](file:///d:/Project/Smart%20Path%20Suggestor/server.py) starts, it loads **three components** once (takes ~10–15 seconds):
+
+```python
+# Load YOLOv8 for object detection (persons, cars, chairs, etc.)
+yolo_model = YOLO("yolov8n.pt")
+
+# Load MiDaS for monocular depth estimation
+midas = torch.hub.load("intel-isl/MiDaS", "MiDaS_small", trust_repo=True)
+midas.eval()
+midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms", trust_repo=True)
+midas_transform  = midas_transforms.small_transform
+device = torch.device("cpu")
+midas.to(device)
+
+# Load the navigation engine (tracking + message generation)
+nav_engine = NavigationEngine()
+```
+
+> [!IMPORTANT]
+> **YOLOv8** detects *what* objects exist.  **MiDaS** estimates *how far* they are.  **NavigationEngine** decides *what to say*.
+
+### ⚙️ Configuration Constants
+
+```python
+KNOWN_DISTANCE_M      = 2.0      # Calibration: known real-world distance
+MIDAS_VALUE_AT_KNOWN  = 142      # MiDaS output at that known distance
+SCALE                 = KNOWN_DISTANCE_M * MIDAS_VALUE_AT_KNOWN  # = 284
+
+DANGER_DISTANCE_M     = 1.5      # Warn when object < 1.5m
+CRITICAL_DISTANCE_M   = 0.8      # Critical alert at < 0.8m
+CONFIDENCE_THRESHOLD  = 0.40     # Ignore YOLO detections below 40% confidence
+```
+
+### 📐 Depth Conversion: MiDaS → Meters
+
+MiDaS outputs *relative* depth values (higher = closer). We convert to real-world meters using calibration:
+
+```python
+def midas_to_meters(depth_value):
+    """Convert MiDaS relative depth to approximate meters"""
+    return SCALE / (float(depth_value) + 1e-6)
+    # Example: SCALE=284, depth_value=142 → 284/142 = 2.0 meters
+```
+
+### 🗺️ Region System (5 Numeric Regions)
+
+The camera frame is divided into **5 horizontal regions** numbered **-2 to +2** to locate objects spatially. **Region 0 (center)** is the walking path and gets full critical alerts. Side regions get reduced alerts:
+
+```
+┌──────┬──────┬──────┬──────┬──────┐
+│  -2  │  -1  │   0  │  +1  │  +2  │
+│ LEFT │C-LEFT│CENTER│C-RIGHT│RIGHT│
+│ 0-20%│20-40%│40-60%│60-80% │80%+ │
+└──────┴──────┴──────┴──────┴──────┘
+```
+
+| Region | Alert Level | Behavior |
+|--------|-------------|----------|
+| **0** (center) | Full CRITICAL/DANGER | Voice + strong vibration |
+| **±1** (near-side) | Max WARN | Brief voice + short beep |
+| **±2** (far-side) | Max GUIDE | Directional beep only |
+
+```python
+def get_zone(center_x, frame_width):
+    ratio = center_x / frame_width
+    if   ratio < 0.20: return -2   # far left
+    elif ratio < 0.40: return -1   # center-left
+    elif ratio < 0.60: return  0   # center (walking path)
+    elif ratio < 0.80: return  1   # center-right
+    else:              return  2   # far right
+```
+
+There's also a **vertical zone** (top/middle/bottom) — objects at the bottom of the frame are physically closest:
+
+```python
+def get_vertical_zone(center_y, frame_height):
+    ratio = center_y / frame_height
+    if ratio < 0.33:   return "top"       # Far objects
+    elif ratio < 0.66: return "middle"    # Medium distance
+    else:              return "bottom"    # Close objects (ground level)
+```
+
+### 🔥 Core Detection Pipeline — [run_detection(frame)](file:///d:/Project/Smart%20Path%20Suggestor/server.py#144-250)
+
+This is the **heart of the server**. Called for every frame received from the phone:
+
+```python
+def run_detection(frame):
+    h, w = frame.shape[:2]
+    img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+    # STEP 1: Run YOLO — get all detected objects
+    yolo_results = yolo_model(frame, imgsz=480, verbose=False)
+    boxes = yolo_results[0].boxes
+
+    # STEP 2: Run MiDaS — get depth map for entire frame
+    input_batch = midas_transform(img_rgb).to(device)
+    with torch.no_grad():
+        prediction = midas(input_batch)
+        prediction = torch.nn.functional.interpolate(
+            prediction.unsqueeze(1),
+            size=img_rgb.shape[:2],
+            mode="bilinear", align_corners=False,
+        ).squeeze()
+    depth_map = prediction.cpu().numpy()
+```
+
+**Per-object analysis** — for each detected object, calculate distance, zone, and risk:
+
+```python
+    for box in boxes:
+        conf = float(box.conf[0])
+        if conf < CONFIDENCE_THRESHOLD:
+            continue
+
+        x1, y1, x2, y2 = map(int, box.xyxy[0])
+        label = yolo_model.names[int(box.cls[0])]
+
+        # Depth: use bottom 40% of bounding box (ground contact = more accurate)
+        y_ground = int(y1 + 0.6 * (y2 - y1))
+        roi_depth = depth_map[y_ground:y2, x1:x2]
+        avg_depth = float(np.median(roi_depth)) if roi_depth.size > 0 else 128.0
+        distance_m = midas_to_meters(avg_depth)
+
+        # Assign zone (left/center/right)
+        zone = get_zone((x1 + x2) / 2, w)
+
+        # Risk scoring
+        priority = PRIORITY_WEIGHTS.get(label, 3.0)        # car=10, person=7, chair=4
+        proximity = min(1.0, 2.0 / (distance_m + 0.1))     # closer = higher
+        v_mult = {"bottom": 2.0, "middle": 1.2, "top": 0.7}[v_zone]
+        risk = priority * proximity * v_mult
+
+        zone_risks[zone] = max(zone_risks[zone], risk)
+```
+
+> [!TIP]
+> **Risk Score Formula**: `risk = object_weight × proximity × vertical_multiplier`
+> - A **car** (weight 10) at **0.5m** (proximity ~1.0) at **bottom** of frame (×2.0) = **risk 20.0** ⚠️
+> - A **chair** (weight 4) at **3.0m** (proximity ~0.65) at **top** of frame (×0.7) = **risk 1.8** ✅
+
+Finally, pass everything to the **Navigation Engine**:
+
+```python
+    nav_result = nav_engine.process(detections, zone_risks)
+    return {
+        "detections":     detections,
+        "zone_risks":     zone_risks,
+        "danger":         danger_found,
+        "voice_message":  nav_result["voice_message"],
+        "priority":       nav_result["priority"],       # CRITICAL/DANGER/WARN/GUIDE/CLEAR
+        "should_speak":   nav_result["should_speak"],    # True/False
+        "alert_pattern":  nav_result["alert_pattern"],   # vibration pattern
+        "safe_direction": nav_result["safe_direction"],  # left/right/straight/stop
+    }
+```
+
+### 🌐 Flask Routes
+
+| Route | Method | Purpose |
+|-------|--------|---------|
+| `/` | GET | Serves [mobile_client.html](file:///d:/Project/Smart%20Path%20Suggestor/mobile_client.html) to the phone |
+| `/health` | GET | Health check — verify server is running |
+| `/detect` | POST | **Main endpoint** — receives image, returns detections |
+
+```python
+@app.route("/detect", methods=["POST"])
+def detect():
+    data = request.get_json()
+    frame = decode_base64_image(data["image"])   # Base64 → OpenCV
+    frame = cv2.resize(frame, (480, 360))        # Resize for speed
+    result = run_detection(frame)                 # Full AI pipeline
+    return jsonify(result)
+```
+
+### 🌐 Server Startup & Network Discovery
+
+```python
+if __name__ == "__main__":
+    def get_wifi_ip():
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))   # Dummy connection to find local IP
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+
+    app.run(host="0.0.0.0", port=5000, threaded=True)
+```
+
+> `host="0.0.0.0"` means the server accepts connections from **any device on the same WiFi network** (not just localhost).
+
+---
+
+## 2️⃣ [navigation_engine.py](file:///d:/Project/Smart%20Path%20Suggestor/navigation_engine.py) — The Navigation Brain
+
+> **What it does**: Takes raw detections and produces stable, intelligent voice messages. Contains 4 internal classes that work together.
+
+### Architecture of NavigationEngine
+
+```mermaid
+graph TD
+    A["Raw Detections<br/>(from server.py)"] --> B["ObjectTracker<br/>Stability Filter"]
+    B --> C["ZoneSmoother<br/>Anti-Flicker"]
+    C --> D["NavigationEngine.process()"]
+    D --> E["_get_primary_threat()"]
+    D --> F["_get_priority()"]
+    D --> G["_build_message()"]
+    D --> H["_get_alert()"]
+    E --> I["SituationState<br/>Cooldown Control"]
+    I --> J["Final Output:<br/>voice_message + alerts"]
+```
+
+### Class 1: [ObjectTracker](file:///d:/Project/Smart%20Path%20Suggestor/navigation_engine.py#105-159) — Stability Filter
+
+**Problem**: YOLO sometimes detects an object for 1 frame then loses it (false positive).  
+**Solution**: Only report objects seen in **3+ consecutive frames**.
+
+```python
+class ObjectTracker:
+    def __init__(self, stability_frames=3):
+        self.history = collections.defaultdict(
+            lambda: collections.deque(maxlen=stability_frames)
+        )
+
+    def update(self, detections):
+        for det in detections:
+            key = f"{det['label']}_{det['zone']}"   # e.g. "person_center"
+            self.history[key].append(det)
+
+        # Only return objects seen in enough frames
+        stable = []
+        for key, frames in self.history.items():
+            if len(frames) >= self.stability_frames:
+                avg_dist = np.mean([f["distance_m"] for f in frames])
+                latest = frames[-1].copy()
+                latest["distance_m"] = round(float(avg_dist), 2)
+                stable.append(latest)
+        return stable
+```
+
+> [!NOTE]
+> **Key insight**: Distance is averaged across frames for smoothness. If a person is detected at `1.2m, 1.3m, 1.1m` across 3 frames, the reported distance is `1.2m` (average).
+
+### Class 2: [ZoneSmoother](file:///d:/Project/Smart%20Path%20Suggestor/navigation_engine.py#166-208) — Anti-Flicker
+
+**Problem**: An object at `39%` → center_left, at `41%` → center. Voice says "left, center, left, center..." (confusing).  
+**Solution**: Majority vote over last 5 frames with 60% threshold.
+
+```python
+class ZoneSmoother:
+    def update(self, zone_risks):
+        safest = min(zone_risks, key=zone_risks.get)     # zone with lowest risk
+        self.zone_history.append(safest)
+
+        # Majority vote over last 5 frames
+        counts = collections.Counter(self.zone_history)
+        majority_zone = counts.most_common(1)[0][0]
+        majority_ratio = counts[majority_zone] / self.smoothing_frames
+
+        # Only switch if 60% of recent frames agree
+        if majority_ratio >= 0.6:
+            self.current_zone = majority_zone
+        return self.current_zone
+```
+
+### Class 3: [SituationState](file:///d:/Project/Smart%20Path%20Suggestor/navigation_engine.py#215-253) — Cooldown Control
+
+**Problem**: Without cooldown, the system says "Person ahead" 20 times in 10 seconds.  
+**Solution**: Different cooldown per priority level.
+
+```python
+COOLDOWN = {
+    "CRITICAL": 2.0,   # Repeat critical warnings every 2 seconds
+    "DANGER":   4.0,   # Danger messages every 4 seconds
+    "WARN":     6.0,   # Warnings every 6 seconds
+    "GUIDE":    8.0,   # Guidance every 8 seconds
+    "CLEAR":   10.0,   # "Path clear" every 10 seconds
+}
+
+class SituationState:
+    def should_speak(self, priority, message_text):
+        # Always speak if message changed (new situation)
+        if message_text != self.last_message_text.get(priority, ""):
+            return True
+        # Repeat same message only after cooldown
+        if time.time() - self.last_message_time.get(priority, 0) >= cooldown:
+            return True
+        return False
+```
+
+### Class 4: [NavigationEngine](file:///d:/Project/Smart%20Path%20Suggestor/navigation_engine.py#260-516) — The Orchestrator
+
+This is the **main class** that ties everything together. Its [process()](file:///d:/Project/Smart%20Path%20Suggestor/navigation_engine.py#289-334) method runs 8 steps per frame:
+
+```python
+class NavigationEngine:
+    def __init__(self):
+        self.tracker  = ObjectTracker()    # Class 1
+        self.smoother = ZoneSmoother()     # Class 2
+        self.state    = SituationState()   # Class 3
+
+    def process(self, raw_detections, zone_risks):
+        # Step 1: Stabilize detections (filter noise)
+        stable_dets = self.tracker.update(raw_detections)
+
+        # Step 2: Smooth zone assignment (prevent flickering)
+        safe_zone = self.smoother.update(zone_risks)
+
+        # Step 3: Find most dangerous object
+        threat = self._get_primary_threat(stable_dets)
+
+        # Step 4: Assign priority (CRITICAL/DANGER/WARN/GUIDE/CLEAR)
+        priority = self._get_priority(threat)
+
+        # Step 5: Build voice message
+        message = self._build_message(threat, safe_zone, zone_risks, stable_dets)
+
+        # Step 6: Should we speak right now? (cooldown check)
+        speak_now = self.state.should_speak(priority, message)
+
+        # Step 7: Get vibration pattern
+        alert = self._get_alert(priority)
+
+        # Step 8: Safe direction for arrow display
+        safe_dir = self._get_safe_direction(zone_risks, threat)
+
+        return { "voice_message": message, "priority": priority, ... }
+```
+
+### Priority Levels & Region-Aware Distance Bands
+
+```
+┌──────────────────────────────────────────────────────────┐
+│  DISTANCE FROM USER                                      │
+│                                                          │
+│  0m ◄────── 3.0m ──── 5.0m ──── 7.0m ──── 9.0m ──────► │
+│     CRITICAL    DANGER    WARN      GUIDE     CLEAR      │
+│     🔴 STOP     🟠 SLOW   🟡 WATCH  🔵 GUIDE  🟢 SAFE   │
+└──────────────────────────────────────────────────────────┘
+```
+
+**Region caps** override the raw distance-based priority:
+
+| Region | Max Priority | Rationale |
+|--------|-------------|----------|
+| 0 (center) | CRITICAL | Walking path — full alerts |
+| ±1 (near-side) | WARN | Not in path, brief alert |
+| ±2 (far-side) | GUIDE | Off-path, beep only |
+
+```python
+def _get_priority(self, threat):
+    # Raw priority from distance
+    if dist <= 3.0 or (high_risk and dist <= 5.0):  raw = "CRITICAL"
+    elif dist <= 5.0:                                raw = "DANGER"
+    elif dist <= 7.0:                                raw = "WARN"
+    else:                                            raw = "GUIDE"
+    # Cap by region
+    max_allowed = {0: "CRITICAL", 1: "WARN", 2: "GUIDE"}[abs(region)]
+    return min(raw, max_allowed)  # by priority rank
+```
+
+> [!WARNING]
+> **High-risk objects** (vehicles, potholes, stairs) are escalated to CRITICAL at **1.5m** instead of the normal 0.8m — giving extra warning time.
+
+### Voice Message Examples
+
+| Situation | Priority | Voice Output |
+|-----------|----------|-------------|
+| Car directly ahead (region 0) at 2.0m | CRITICAL | *"Vehicle directly ahead! Stop immediately."* |
+| Person at 3.5m center (region 0) | DANGER | *"Person ahead, 3.5 meters. Slow down."* |
+| Pothole slightly left (region -1) at 2.0m | WARN | *"Pothole slightly left, 2.0 meters."* |
+| Chair on far right (region +2) at 4.0m | GUIDE | *"Chair on your right."* + right beep (800 Hz) |
+| Path is completely clear | CLEAR | *"Path is clear."* |
+| Object on far left (region -2) | GUIDE | Left beep (400 Hz) only — no voice |
+
+### Vibration & Beep Patterns (Region-Aware)
+
+**Center (Region 0) — full vibration:**
+```python
+"CRITICAL": [300, 100, 300, 100, 300]   # ━━━ ‧ ━━━ ‧ ━━━  (3 strong pulses)
+"DANGER":   [200, 100, 200]              # ━━ ‧ ━━           (2 medium pulses)
+"WARN":     [150]                        # ━                  (1 short pulse)
+"GUIDE":    []                           # (no vibration)
+"CLEAR":    []                           # (no vibration)
+```
+
+**Near-Side (Region ±1) — short beep + single vibration:**
+```python
+pattern: [100]     # single short pulse
+beep_side: "left" or "right"   # directional beep
+```
+
+**Far-Side (Region ±2) — directional beep only (no vibration):**
+```python
+pattern: []        # no vibration
+beep_side: "left" (400 Hz) or "right" (800 Hz)   # different freq per side
+```
+
+---
+
+## 3️⃣ [mobile_client.html](file:///d:/Project/Smart%20Path%20Suggestor/mobile_client.html) — The Phone Interface
+
+> **What it does**: Runs **entirely in the phone's browser**. Captures camera frames, sends them to the server, and provides voice + vibration feedback to the user.
+
+### How the Phone Connects
+
+1. User opens `http://LAPTOP_IP:5000/` on phone browser
+2. Server serves [mobile_client.html](file:///d:/Project/Smart%20Path%20Suggestor/mobile_client.html)
+3. The HTML/JS app runs entirely in the browser
+
+```python
+# In server.py:
+@app.route("/", methods=["GET"])
+def mobile_client():
+    return send_file("mobile_client.html")
+```
+
+### Camera Initialization
+
+```javascript
+async function startCamera() {
+    const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+            facingMode: "environment",   // Rear camera (back-facing)
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+        }
+    });
+    video.srcObject = stream;
+}
+```
+
+### Frame Capture & Send Loop
+
+Every **500ms** (2 detections/second), the app captures a frame and sends it:
+
+```javascript
+const DETECT_INTERVAL_MS = 500;
+const JPEG_QUALITY = 0.65;
+const CAPTURE_WIDTH = 320;
+const CAPTURE_HEIGHT = 240;
+
+function captureFrame() {
+    canvas.width = CAPTURE_WIDTH;
+    canvas.height = CAPTURE_HEIGHT;
+    ctx.drawImage(video, 0, 0, CAPTURE_WIDTH, CAPTURE_HEIGHT);
+
+    // Convert to Base64 JPEG (strip prefix)
+    const dataURL = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
+    return dataURL.split(",")[1];   // Remove "data:image/jpeg;base64,"
+}
+
+async function sendFrame() {
+    const b64Frame = captureFrame();
+
+    const response = await fetch(`${SERVER_URL}/detect`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: b64Frame }),
+        signal: AbortSignal.timeout(3000)   // 3 second timeout
+    });
+
+    const data = await response.json();
+    handleResult(data);
+}
+
+// Start the loop when user taps START
+intervalId = setInterval(sendFrame, DETECT_INTERVAL_MS);
+```
+
+### Voice Output (Text-to-Speech)
+
+```javascript
+function speak(message, priority) {
+    if (isMuted) return;
+
+    // Only CRITICAL messages can interrupt ongoing speech
+    if (isSpeaking && priority !== "CRITICAL") return;
+
+    synth.cancel();   // Stop current speech
+
+    const utter = new SpeechSynthesisUtterance(message);
+    utter.rate   = priority === "CRITICAL" ? 1.3 : 1.1;  // Faster for critical
+    utter.pitch  = priority === "CRITICAL" ? 1.2 : 1.0;  // Higher pitch = urgency
+    utter.volume = 1.0;
+
+    synth.speak(utter);
+}
+```
+
+### Vibration Feedback
+
+```javascript
+// Server sends alert_pattern like [300, 100, 300]
+if (vibEnabled && alertPat.length > 0 && navigator.vibrate) {
+    navigator.vibrate(alertPat);   // Browser Vibration API
+}
+```
+
+### UI Components
+
+The mobile client has these visual elements:
+
+| Component | Purpose |
+|-----------|---------|
+| **Camera preview** | Live `<video>` feed from rear camera |
+| **Status box** | Shows current voice message, color-coded by priority |
+| **Zone display** | 5 blocks showing risk level per zone (color: green/yellow/red) |
+| **Detections list** | Top 5 detected objects with distance and zone |
+| **Control buttons** | START, STOP, MUTE voice, toggle vibration |
+| **Stats bar** | Connection status, latency, requests/second |
+
+### Screen Wake Lock
+
+Prevents the phone screen from sleeping during navigation:
+
+```javascript
+let wakeLock = null;
+async function requestWakeLock() {
+    wakeLock = await navigator.wakeLock.request("screen");
+}
+requestWakeLock();
+
+// Re-acquire when page becomes visible again
+document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") requestWakeLock();
+});
+```
+
+---
+
+## 4️⃣ [detection_local.py](file:///d:/Project/Smart%20Path%20Suggestor/detection_local.py) — Standalone Local Mode
+
+> **What it does**: Runs the same detection pipeline **entirely on the laptop** using the built-in webcam. No phone or server needed. Uses `winsound.Beep()` for audio alerts.
+
+```python
+# Camera setup (laptop webcam)
+cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+
+while True:
+    ret, frame = cap.read()
+    frame = cv2.resize(frame, (480, 360))
+
+    # Run YOLO + MiDaS every 8th frame (for performance)
+    if frame_count % 8 == 0:
+        results = model(frame, imgsz=480, verbose=False)
+        cached_boxes = results[0].boxes
+
+        input_batch = transform(img_rgb).to(device)
+        with torch.no_grad():
+            prediction = midas(input_batch)
+            # ... interpolate to match frame size
+        cached_depth_map = prediction.cpu().numpy()
+
+    # Draw bounding boxes + distance labels
+    for box in cached_boxes:
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        cv2.putText(frame, f"{label} {distance_m:.2f}m", ...)
+
+    # Beep alert when object < 0.5 meters
+    if danger_detected and (current_time - last_beep_time > BEEP_COOLDOWN):
+        winsound.Beep(1000, 300)   # 1000Hz for 300ms
+
+    cv2.imshow("Smart Path - Beep Alert", frame)
+```
+
+> [!NOTE]
+> **Key difference from server mode**: Local mode processes only every **8th frame** to maintain performance on a single machine, while server mode processes every frame received (phone sends every 500ms).
+
+---
+
+## 5️⃣ [gen_cert.py](file:///d:/Project/Smart%20Path%20Suggestor/gen_cert.py) — SSL Certificate Generator
+
+> **What it does**: Generates a self-signed SSL certificate so the server can run over HTTPS. This is needed because some phone browsers require HTTPS for camera access.
+
+```python
+from cryptography import x509
+from cryptography.hazmat.primitives.asymmetric import rsa
+
+# Generate RSA key pair
+key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+# Build certificate with Subject Alternative Names
+cert = (
+    x509.CertificateBuilder()
+    .subject_name(x509.Name([
+        x509.NameAttribute(NameOID.COMMON_NAME, "SmartPathSuggestor"),
+    ]))
+    .add_extension(
+        x509.SubjectAlternativeName([
+            x509.DNSName("localhost"),
+            x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
+            x509.IPAddress(ipaddress.ip_address("192.168.0.109")),
+        ]), critical=False,
+    )
+    .sign(key, hashes.SHA256())
+)
+
+# Write cert.pem and key.pem files
+```
+
+---
+
+## 🧬 Key Algorithms Summary
+
+### 1. Depth Estimation (MiDaS Calibration)
+```
+real_distance = SCALE / midas_depth_value
+where SCALE = known_real_distance × midas_value_at_that_distance
+```
+
+### 2. Risk Scoring
+```
+risk = object_weight × proximity_factor × vertical_multiplier
+     = PRIORITY_WEIGHTS[label] × min(1.0, 2.0/(distance+0.1)) × {bottom:2, middle:1.2, top:0.7}
+```
+
+### 3. Zone Assignment (Numeric Regions)
+```
+Frame divided into 5 regions: -2, -1, 0, +1, +2 (20% each)
+Region 0 = center walking path (full alerts)
+Region ±1 = near-side (max WARN, short beep)
+Region ±2 = far-side (max GUIDE, directional beep only)
+Left beep = 400 Hz, Right beep = 800 Hz
+```
+
+### 4. Object Stability
+```
+Object must appear in 3 consecutive frames → "stable"
+Distance averaged across frames for smoothness
+Stale objects (not seen for 2s) are removed
+```
+
+### 5. Zone Smoothing
+```
+Majority vote over last 5 frames
+Need 60% agreement to switch safe zone
+Prevents confusing "left-center-left-center" flickering
+```
+
+---
+
+## 🚀 How to Run
+
+### Server + Phone Mode (Primary)
+```bash
+# On laptop:
+pip install flask ultralytics torch torchvision opencv-python numpy
+python server.py
+
+# On phone:
+# Open browser → http://LAPTOP_IP:5000
+# Tap START
+```
+
+### Local Webcam Mode (Testing)
+```bash
+python detection_local.py
+# Press Q to quit
+```
+
+---
+
+## 🔑 Tech Stack
+
+| Technology | Purpose |
+|------------|---------|
+| **Python + Flask** | HTTP API server |
+| **YOLOv8** (Ultralytics) | Real-time object detection (80 COCO classes) |
+| **MiDaS** (Intel) | Monocular depth estimation from single image |
+| **OpenCV** | Image processing (decode, resize, color conversion) |
+| **PyTorch** | Deep learning inference runtime |
+| **Web Speech API** | Text-to-speech on mobile browser |
+| **Vibration API** | Haptic feedback on mobile browser |
+| **Canvas API** | Frame capture from video stream |

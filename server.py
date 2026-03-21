@@ -27,6 +27,11 @@ import json
 from flask import Flask, request, jsonify, send_file
 from ultralytics import YOLO
 from navigation_engine import NavigationEngine
+try:
+    from waitress import serve
+except ImportError:
+    print("\n⚠️  [IMPORTANT] waitress not found. Run: pip install waitress")
+    serve = None
 
 app = Flask(__name__)
 
@@ -34,17 +39,19 @@ app = Flask(__name__)
 #  CONFIGURATION  (edit these as needed)
 # ─────────────────────────────────────────────
 
-# MiDaS calibration — same as your original code
+# MiDaS calibration
 KNOWN_DISTANCE_M      = 2.0
 MIDAS_VALUE_AT_KNOWN  = 142
-SCALE                 = KNOWN_DISTANCE_M * MIDAS_VALUE_AT_KNOWN
+# SCALE                 = KNOWN_DISTANCE_M * MIDAS_VALUE_AT_KNOWN
+SCALE                 = 775   # Updated based on user calibration
 
-# Distance threshold for danger alert (meters)
-DANGER_DISTANCE_M     = 1.5   # warn at 1.5m  (your original was 0.5m — too close)
-CRITICAL_DISTANCE_M   = 0.8   # critical at 0.8m
+# Distance thresholds for alerts (meters)
+CRITICAL_DISTANCE_M   = 3.0   # red
+DANGER_DISTANCE_M     = 5.0   # orange
+WARN_DISTANCE_M       = 7.0   # yellow
 
 # Minimum YOLO confidence to show a detection
-CONFIDENCE_THRESHOLD  = 0.40
+CONFIDENCE_THRESHOLD  = 0.30
 
 # Zone boundaries — now 5 zones (handled in get_zone())
 
@@ -75,9 +82,12 @@ print("=" * 50)
 print("  Smart Path Suggestor — Loading models...")
 print("=" * 50)
 
-print("[1/2] Loading YOLO...")
-yolo_model = YOLO("yolov8n.pt")   # swap to yolov8s.pt when you have fine-tuned model
-print("      ✅ YOLO loaded")
+print("[1/2] Loading YOLO Models...")
+yolo_models = {
+    "yolov8n": YOLO("yolov8n.pt"),
+    "best": YOLO("best.pt")
+}
+print(f"      ✅ YOLO models loaded: {list(yolo_models.keys())}")
 
 print("[2/2] Loading MiDaS...")
 midas = torch.hub.load("intel-isl/MiDaS", "MiDaS_small", trust_repo=True)
@@ -114,13 +124,21 @@ def decode_base64_image(b64_string):
 
 
 def get_zone(center_x, frame_width):
-    """Return 5-zone position based on object x position"""
+    """Return numeric region based on object x position.
+    Regions:  -2 (far left)  -1 (center-left)  0 (center)  +1 (center-right)  +2 (far right)
+    Region 0 is the walking path — gets full critical alerts.
+    """
     ratio = center_x / frame_width
-    if   ratio < 0.20: return "left"
-    elif ratio < 0.40: return "center_left"
-    elif ratio < 0.60: return "center"
-    elif ratio < 0.80: return "center_right"
-    else:              return "right"
+    if   ratio < 0.20: return -2   # far left
+    elif ratio < 0.40: return -1   # center-left
+    elif ratio < 0.60: return  0   # center (walking path)
+    elif ratio < 0.80: return  1   # center-right
+    else:              return  2   # far right
+
+
+def region_to_label(region):
+    """Convert numeric region to human-readable label for display."""
+    return {-2: "left", -1: "center_left", 0: "center", 1: "center_right", 2: "right"}.get(region, "center")
 
 
 def get_vertical_zone(center_y, frame_height):
@@ -134,6 +152,39 @@ def get_vertical_zone(center_y, frame_height):
         return "bottom"
 
 
+def get_refined_distance(depth_map, x1, y1, x2, y2):
+    """
+    Improved distance estimation using three vertical regions.
+    Focuses on the center 50% horizontally to avoid edge noise.
+    Returns the distance (m) to the closest of the three regions.
+    """
+    bh = y2 - y1
+    bw = x2 - x1
+    cx1 = x1 + bw // 4
+    cx2 = x2 - bw // 4
+
+    # Ensure coordinates are within depth_map bounds
+    h, w = depth_map.shape
+    cx1 = max(0, min(w-1, cx1))
+    cx2 = max(0, min(w-1, cx2))
+    y1 = max(0, min(h-1, y1))
+    y2 = max(0, min(h-1, y2))
+
+    if cx1 >= cx2: cx2 = cx1 + 1 # minor fallback
+
+    regions = {
+        'top':    depth_map[y1 : y1+bh//3,   cx1:cx2],
+        'middle': depth_map[y1+bh//3 : y1+2*bh//3, cx1:cx2],
+        'bottom': depth_map[y1+2*bh//3 : y2,       cx1:cx2],
+    }
+    
+    medians = {k: float(np.median(v)) for k, v in regions.items() if v.size > 0}
+    if not medians:
+        return 10.0 # fallback for distant/unreliable objects
+        
+    closest_midas = max(medians.values())   # max midas = closest point
+    return midas_to_meters(closest_midas)
+
 # generate_voice_message() removed — NavigationEngine handles this now
 
 
@@ -141,12 +192,13 @@ def get_vertical_zone(center_y, frame_height):
 #  CORE DETECTION FUNCTION
 # ─────────────────────────────────────────────
 
-def run_detection(frame):
+def run_detection(frame, model_key="yolov8n"):
     """
     Full pipeline: YOLO + MiDaS + risk scoring + voice message.
-    Input:  OpenCV frame (BGR)
+    Input:  OpenCV frame (BGR), model_key (string)
     Output: dict with detections + voice message + zone risks
     """
+    yolo_model = yolo_models.get(model_key, yolo_models["yolov8n"])
     start_time = time.time()
     h, w       = frame.shape[:2]
     img_rgb    = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -169,11 +221,11 @@ def run_detection(frame):
 
     # ── Per-object analysis ───────────────────────────────────
     zone_risks = {
-        "left":         0.0,
-        "center_left":  0.0,
-        "center":       0.0,
-        "center_right": 0.0,
-        "right":        0.0,
+        -2: 0.0,   # far left
+        -1: 0.0,   # center-left
+         0: 0.0,   # center (walking path)
+         1: 0.0,   # center-right
+         2: 0.0,   # far right
     }
     detections   = []
     danger_found = False
@@ -190,18 +242,15 @@ def run_detection(frame):
         x1 = max(0, x1); y1 = max(0, y1)
         x2 = min(w, x2); y2 = min(h, y2)
 
-        # Depth: use bottom 40% of bounding box (ground contact area — more accurate)
-        y_ground  = int(y1 + 0.6 * (y2 - y1))
-        roi_depth = depth_map[y_ground:y2, x1:x2]
-        avg_depth = float(np.median(roi_depth)) if roi_depth.size > 0 else 128.0
-
-        distance_m = midas_to_meters(avg_depth)
+        # Depth: Improved multi-region analysis
+        distance_m = get_refined_distance(depth_map, x1, y1, x2, y2)
         distance_m = round(distance_m, 2)
 
-        # Zone assignment
+        # Zone assignment (numeric region)
         center_x = (x1 + x2) / 2
         center_y = (y1 + y2) / 2
-        zone     = get_zone(center_x, w)
+        region   = get_zone(center_x, w)          # -2, -1, 0, 1, 2
+        zone     = region_to_label(region)         # string label for display
         v_zone   = get_vertical_zone(center_y, h)
 
         # Risk score
@@ -210,7 +259,7 @@ def run_detection(frame):
         v_mult    = {"bottom": 2.0, "middle": 1.2, "top": 0.7}[v_zone]
         risk      = priority * proximity * v_mult
 
-        zone_risks[zone] = max(zone_risks[zone], risk)
+        zone_risks[region] = max(zone_risks[region], risk)
 
         # Danger flag (same logic as your original beep trigger)
         if 0 < distance_m < DANGER_DISTANCE_M:
@@ -220,6 +269,7 @@ def run_detection(frame):
             "label":        label,
             "confidence":   round(conf, 2),
             "distance_m":   distance_m,
+            "region":       region,
             "zone":         zone,
             "vertical":     v_zone,
             "risk":         round(risk, 2),
@@ -234,7 +284,7 @@ def run_detection(frame):
 
     return {
         "detections":     detections,
-        "zone_risks":     {k: round(v, 2) for k, v in zone_risks.items()},
+        "zone_risks":     {str(k): round(v, 2) for k, v in zone_risks.items()},
         "danger":         danger_found,
         "latency_ms":     latency_ms,
         "frame_size":     [w, h],
@@ -244,6 +294,7 @@ def run_detection(frame):
         "alert_type":     nav_result["alert_type"],
         "alert_pattern":  nav_result["alert_pattern"],
         "alert_duration": nav_result["alert_duration"],
+        "beep_side":      nav_result.get("beep_side", "center"),
         "safe_direction": nav_result["safe_direction"],
         "safe_zone":      nav_result["safe_zone"],
     }
@@ -258,7 +309,8 @@ def health():
     """Quick check — open this in phone browser to verify connection"""
     return jsonify({
         "status":  "running",
-        "models":  "YOLOv8n + MiDaS_small",
+        "models":  list(yolo_models.keys()),
+        "depth_model": "MiDaS_small",
         "message": "Smart Path Suggestor server is ready."
     })
 
@@ -270,7 +322,8 @@ def detect():
 
     Expects JSON body:
     {
-        "image": "<base64 encoded JPEG string>"
+        "image": "<base64 encoded JPEG string>",
+        "model": "yolov8n"  // optional, defaults to yolov8n
     }
 
     Returns JSON:
@@ -301,9 +354,13 @@ def detect():
     # ── Resize for performance (same as your original code) ───
     frame = cv2.resize(frame, (480, 360))
 
+    # ── Get requested model ───────────────────────────────────
+    model_key = data.get("model", "yolov8n")
+
     # ── Run detection pipeline ────────────────────────────────
     try:
-        result = run_detection(frame)
+        result = run_detection(frame, model_key=model_key)
+        result["model_used"] = model_key
     except Exception as e:
         return jsonify({"error": f"Detection failed: {str(e)}"}), 500
 
@@ -352,9 +409,14 @@ if __name__ == "__main__":
     print("     4. Tap 'Relaunch' → then open the URL above")
     print("=" * 50 + "\n")
 
-    app.run(
-        host="0.0.0.0",   # Accept connections from any device on network
-        port=5000,
-        debug=False,       # Keep False — debug mode reloads models twice
-        threaded=True      # Handle multiple requests simultaneously
-    )
+    if serve:
+        print(f"  ⚡ Using WAITRESS production server (more stable on Windows)")
+        serve(app, host="0.0.0.0", port=5000, threads=6)
+    else:
+        print(f"  ⚠️  Falling back to Flask dev server (less stable)")
+        app.run(
+            host="0.0.0.0",   # Accept connections from any device on network
+            port=5000,
+            debug=False,       # Keep False — debug mode reloads models twice
+            threaded=True      # Handle multiple requests simultaneously
+        )

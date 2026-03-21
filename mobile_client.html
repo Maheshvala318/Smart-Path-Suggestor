@@ -32,13 +32,30 @@
       text-transform: uppercase;
     }
 
-    /* Camera preview */
-    #video {
+    /* Camera preview container */
+    #camera-container {
+      position: relative;
       width: 100%;
       max-width: 480px;
+    }
+
+    #video {
+      width: 100%;
       border-radius: 12px;
       border: 2px solid #1f2937;
       background: #111;
+      display: block;
+    }
+
+    /* Bounding box overlay canvas */
+    #bbox-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      border-radius: 12px;
+      pointer-events: none;
     }
 
     /* Hidden canvas used for frame capture */
@@ -262,6 +279,42 @@
     #connection-dot.disconnected {
       background: #ef4444;
     }
+    /* Model selector */
+    #model-selector {
+      width: 100%;
+      max-width: 480px;
+      margin-top: 10px;
+      padding: 12px;
+      border-radius: 12px;
+      background: #111827;
+      border: 1px solid #1f2937;
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+    }
+
+    .model-option {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      font-size: 0.9em;
+      color: #9ca3af;
+    }
+
+    .model-option input {
+      accent-color: #4ade80;
+      cursor: pointer;
+    }
+
+    .model-option span {
+      transition: color 0.2s;
+    }
+
+    .model-option input:checked + span {
+      color: #4ade80;
+      font-weight: 600;
+    }
   </style>
 </head>
 
@@ -269,8 +322,11 @@
 
   <h1>🦯 Smart Path Suggestor</h1>
 
-  <!-- Live camera preview -->
-  <video id="video" autoplay playsinline muted></video>
+  <!-- Live camera preview with bounding box overlay -->
+  <div id="camera-container">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="bbox-canvas"></canvas>
+  </div>
   <canvas id="canvas"></canvas>
 
   <!-- AI voice message -->
@@ -278,27 +334,39 @@
     <div id="status-text" class="idle">Tap START to begin navigation</div>
   </div>
 
-  <!-- Zone risk display -->
+  <!-- Model selection -->
+  <div id="model-selector">
+    <label class="model-option">
+      <input type="radio" name="yolo-model" value="yolov8n" checked onchange="updateModelPreference('yolov8n')">
+      <span>Standard (v8n)</span>
+    </label>
+    <label class="model-option">
+      <input type="radio" name="yolo-model" value="best" onchange="updateModelPreference('best')">
+      <span>Finetuned (Best)</span>
+    </label>
+  </div>
+
+  <!-- Zone risk display (numeric regions) -->
   <div id="zones">
-    <div class="zone-block" id="zone-left">
-      <div class="zone-label">LEFT</div>
-      <div class="zone-risk" id="risk-left">—</div>
+    <div class="zone-block" id="zone--2">
+      <div class="zone-label">-2</div>
+      <div class="zone-risk" id="risk--2">—</div>
     </div>
-    <div class="zone-block" id="zone-center_left">
-      <div class="zone-label">C-LEFT</div>
-      <div class="zone-risk" id="risk-center_left">—</div>
+    <div class="zone-block" id="zone--1">
+      <div class="zone-label">-1</div>
+      <div class="zone-risk" id="risk--1">—</div>
     </div>
-    <div class="zone-block" id="zone-center">
-      <div class="zone-label">CENTER</div>
-      <div class="zone-risk" id="risk-center">—</div>
+    <div class="zone-block" id="zone-0">
+      <div class="zone-label">0</div>
+      <div class="zone-risk" id="risk-0">—</div>
     </div>
-    <div class="zone-block" id="zone-center_right">
-      <div class="zone-label">C-RIGHT</div>
-      <div class="zone-risk" id="risk-center_right">—</div>
+    <div class="zone-block" id="zone-1">
+      <div class="zone-label">+1</div>
+      <div class="zone-risk" id="risk-1">—</div>
     </div>
-    <div class="zone-block" id="zone-right">
-      <div class="zone-label">RIGHT</div>
-      <div class="zone-risk" id="risk-right">—</div>
+    <div class="zone-block" id="zone-2">
+      <div class="zone-label">+2</div>
+      <div class="zone-risk" id="risk-2">—</div>
     </div>
   </div>
 
@@ -348,10 +416,13 @@
     let reqCount = 0;
     let reqWindowStart = Date.now();
     let isSpeaking = false;
+    let selectedModel = "yolov8n";
 
     const video = document.getElementById("video");
     const canvas = document.getElementById("canvas");
     const ctx = canvas.getContext("2d");
+    const bboxCanvas = document.getElementById("bbox-canvas");
+    const bboxCtx = bboxCanvas.getContext("2d");
     const synth = window.speechSynthesis;
 
     // ─────────────────────────────────────────────
@@ -402,7 +473,10 @@
         const response = await fetch(`${SERVER_URL}/detect`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ image: b64Frame }),
+          body: JSON.stringify({ 
+            image: b64Frame,
+            model: selectedModel
+          }),
           signal: AbortSignal.timeout(3000)   // 3s timeout
         });
 
@@ -443,6 +517,7 @@
       const zoneRisks = data.zone_risks || {};
       const detections = data.detections || [];
       const alertPat = data.alert_pattern || [];
+      const beepSide = data.beep_side || "center";
 
       // ── Update status message ──────────────────
       let statusClass = "clear";
@@ -450,16 +525,22 @@
       else if (priority === "DANGER") statusClass = "danger";
       else if (priority === "WARN") statusClass = "warn";
       else if (priority === "GUIDE") statusClass = "guide";
+      else if (priority === "CLEAR") statusClass = "clear";
       updateStatus(message, statusClass);
 
-      // ── Speak only when server says so ─────────
-      if (shouldSpk) {
+      // ── Speak only for center objects (region 0) ──
+      if (shouldSpk && beepSide === "center") {
         speak(message, priority);
       }
 
-      // ── Vibration ──────────────────────────────
-      if (vibEnabled && alertPat.length > 0 && navigator.vibrate) {
+      // ── Vibration — only for center objects ─────
+      if (vibEnabled && beepSide === "center" && alertPat.length > 0 && navigator.vibrate) {
         navigator.vibrate(alertPat);
+      }
+
+      // ── Beep for left/right side objects ────────
+      if (beepSide === "left" || beepSide === "right") {
+        playDirectionalBeep(beepSide);
       }
 
       // ── Update zone risk display ───────────────
@@ -467,6 +548,9 @@
 
       // ── Update detections list ─────────────────
       updateDetectionsList(detections);
+
+      // ── Draw bounding boxes on camera feed ─────
+      drawBoundingBoxes(detections, data.frame_size);
     }
 
     // ─────────────────────────────────────────────
@@ -494,6 +578,95 @@
     }
 
     // ─────────────────────────────────────────────
+    //  DIRECTIONAL BEEP (AudioContext)
+    //  Left side → low freq (400 Hz)
+    //  Right side → high freq (800 Hz)
+    // ─────────────────────────────────────────────
+
+    let audioCtx = null;
+    let lastBeepTime = 0;
+    const BEEP_COOLDOWN_MS = 600;   // don't beep more than ~2x/sec
+
+    function playDirectionalBeep(side) {
+      if (isMuted) return;
+
+      const now = Date.now();
+      if (now - lastBeepTime < BEEP_COOLDOWN_MS) return;
+      lastBeepTime = now;
+
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+
+      const freq = side === "left" ? 400 : 800;   // low for left, high for right
+      const duration = side === "left" ? 0.15 : 0.12;
+
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.value = 0.3;   // soft beep
+
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      osc.start();
+      osc.stop(audioCtx.currentTime + duration);
+    }
+
+    // ─────────────────────────────────────────────
+    //  BOUNDING BOX DRAWING
+    // ─────────────────────────────────────────────
+
+    function drawBoundingBoxes(detections, frameSize) {
+      // Match canvas resolution to displayed video size
+      const displayW = video.clientWidth;
+      const displayH = video.clientHeight;
+      bboxCanvas.width = displayW;
+      bboxCanvas.height = displayH;
+
+      bboxCtx.clearRect(0, 0, displayW, displayH);
+
+      if (!frameSize || frameSize.length < 2 || detections.length === 0) return;
+
+      const serverW = frameSize[0];   // 480
+      const serverH = frameSize[1];   // 360
+      const scaleX = displayW / serverW;
+      const scaleY = displayH / serverH;
+
+      detections.forEach(det => {
+        const [x1, y1, x2, y2] = det.bbox;
+        const dx = x1 * scaleX;
+        const dy = y1 * scaleY;
+        const dw = (x2 - x1) * scaleX;
+        const dh = (y2 - y1) * scaleY;
+
+        // Color by distance (matching 3m, 5m, 7m thresholds)
+        let color = "#4ade80";  // green (safe > 7m)
+        if (det.distance_m < 3.0) color = "#ef4444";       // red (critical < 3m)
+        else if (det.distance_m < 5.0) color = "#f59e0b";  // orange (danger < 5m)
+        else if (det.distance_m < 7.0) color = "#eaea00";  // yellow (warn < 7m)
+
+        // Draw rectangle
+        bboxCtx.strokeStyle = color;
+        bboxCtx.lineWidth = 2;
+        bboxCtx.strokeRect(dx, dy, dw, dh);
+
+        // Draw label background
+        const label = `${det.label} ${det.distance_m.toFixed(1)}m`;
+        bboxCtx.font = "bold 12px Arial";
+        const textW = bboxCtx.measureText(label).width + 8;
+        bboxCtx.fillStyle = color;
+        bboxCtx.fillRect(dx, dy - 18, textW, 18);
+
+        // Draw label text
+        bboxCtx.fillStyle = "#000";
+        bboxCtx.fillText(label, dx + 4, dy - 5);
+      });
+    }
+
+    // ─────────────────────────────────────────────
     //  UI UPDATES
     // ─────────────────────────────────────────────
 
@@ -504,12 +677,12 @@
     }
 
     function updateZoneDisplay(zoneRisks) {
-      const zones = ["left", "center_left", "center", "center_right", "right"];
+      const regions = ["-2", "-1", "0", "1", "2"];
 
-      zones.forEach(zone => {
-        const risk = zoneRisks[zone] || 0;
-        const riskEl = document.getElementById(`risk-${zone}`);
-        const blockEl = document.getElementById(`zone-${zone}`);
+      regions.forEach(region => {
+        const risk = zoneRisks[region] || 0;
+        const riskEl = document.getElementById(`risk-${region}`);
+        const blockEl = document.getElementById(`zone-${region}`);
 
         if (!riskEl || !blockEl) return;
 
@@ -534,14 +707,18 @@
         const row = document.createElement("div");
         row.className = "det-row";
 
-        if (det.distance_m < 0.8) row.classList.add("det-danger");
-        else if (det.distance_m < 1.5) row.classList.add("det-warning");
-        else row.classList.add("det-ok");
+        if (det.distance_m < 3.0) row.classList.add("det-danger");      // red
+        else if (det.distance_m < 5.0) row.classList.add("det-warning"); // orange
+        else if (det.distance_m < 7.0) row.classList.add("det-warn");    // yellow
+        else row.classList.add("det-ok");                              // green
+
+        const regionLabel = { '-2': 'L', '-1': 'CL', '0': 'C', '1': 'CR', '2': 'R' };
+        const rLabel = regionLabel[String(det.region)] || det.zone;
 
         row.innerHTML = `
           <span class="det-label">${det.label.replace("_", " ")}</span>
           <span class="det-dist">${det.distance_m.toFixed(1)}m</span>
-          <span class="det-zone">${det.zone}</span>
+          <span class="det-zone">[${det.region}] ${rLabel}</span>
         `;
 
         container.appendChild(row);
@@ -597,10 +774,10 @@
       updateStatus("Navigation stopped.", "idle");
       updateConnectionStatus(false);
 
-      // Reset zones
-      ["left", "center_left", "center", "center_right", "right"].forEach(z => {
-        const riskEl = document.getElementById(`risk-${z}`);
-        const zoneEl = document.getElementById(`zone-${z}`);
+      // Reset zones (numeric regions)
+      ["-2", "-1", "0", "1", "2"].forEach(r => {
+        const riskEl = document.getElementById(`risk-${r}`);
+        const zoneEl = document.getElementById(`zone-${r}`);
         if (riskEl) riskEl.textContent = "—";
         if (zoneEl) zoneEl.className = "zone-block";
       });
@@ -656,6 +833,11 @@
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") requestWakeLock();
     });
+
+    function updateModelPreference(model) {
+      selectedModel = model;
+      console.log("Model changed to:", model);
+    }
 
     // ─────────────────────────────────────────────
     //  INIT

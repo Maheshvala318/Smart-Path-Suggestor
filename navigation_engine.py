@@ -17,10 +17,10 @@ import numpy as np
 # ─────────────────────────────────────────────────────────────
 
 # Distance bands in meters
-DIST_CRITICAL = 0.8    # STOP immediately
-DIST_DANGER   = 1.5    # slow down
-DIST_WARN     = 3.0    # early warning
-DIST_CLEAR    = 4.0    # safe, no alert
+DIST_CRITICAL = 3.0    # STOP immediately
+DIST_DANGER   = 5.0    # slow down
+DIST_WARN     = 7.0    # early warning
+DIST_CLEAR    = 9.0    # safe, no alert
 
 # Object must appear in this many consecutive frames before alert
 DETECTION_STABILITY_FRAMES = 3
@@ -78,22 +78,48 @@ VOICE_LABELS = {
     "tree":       "tree",
 }
 
-# Zone names for voice output
+# Zone names for voice output (numeric regions)
 ZONE_VOICE = {
-    "left":         "on your left",
-    "center_left":  "slightly left",
-    "center":       "directly ahead",
-    "center_right": "slightly right",
-    "right":        "on your right",
+    -2: "on your left",
+    -1: "slightly left",
+     0: "directly ahead",
+     1: "slightly right",
+     2: "on your right",
 }
 
 # What to do when a zone is dangerous
 ZONE_AVOID = {
-    "left":         "Move right",
-    "center_left":  "Move slightly right",
-    "center":       "Stop",
-    "center_right": "Move slightly left",
-    "right":        "Move left",
+    -2: "Move right",
+    -1: "Move slightly right",
+     0: "Stop",
+     1: "Move slightly left",
+     2: "Move left",
+}
+
+# Region labels for display
+REGION_LABELS = {
+    -2: "left",
+    -1: "center_left",
+     0: "center",
+     1: "center_right",
+     2: "right",
+}
+
+# Maximum priority allowed per region abs-value
+# Region 0 (center) = full alerts,  ±1 = max WARN,  ±2 = max GUIDE
+MAX_PRIORITY_BY_REGION = {
+    0: "CRITICAL",   # center path: full alerts
+    1: "WARN",       # near-path:  reduced, short beep
+    2: "GUIDE",      # off-path:   detect only, minimal beep
+}
+
+# Priority rank for capping comparison
+PRIORITY_RANK = {
+    "CLEAR": 0,
+    "GUIDE": 1,
+    "WARN": 2,
+    "DANGER": 3,
+    "CRITICAL": 4,
 }
 
 
@@ -133,6 +159,7 @@ class ObjectTracker:
                 "label":      det["label"],
                 "distance_m": det["distance_m"],
                 "zone":       det["zone"],
+                "region":     det.get("region", 0),
                 "confidence": det["confidence"],
                 "risk":       det["risk"],
             })
@@ -313,8 +340,8 @@ class NavigationEngine:
         if speak_now:
             self.state.mark_spoken(priority, message)
 
-        # Step 7: Build vibration alert
-        alert = self._get_alert(priority)
+        # Step 7: Build vibration alert (region-aware)
+        alert = self._get_alert(priority, threat)
 
         # Step 8: Safe direction for arrow display
         safe_dir = self._get_safe_direction(zone_risks, threat)
@@ -326,6 +353,7 @@ class NavigationEngine:
             "alert_type":     alert["type"],
             "alert_pattern":  alert["pattern"],
             "alert_duration": alert["duration"],
+            "beep_side":      alert.get("beep_side", "center"),
             "safe_direction": safe_dir,
             "safe_zone":      safe_zone,
             "stable_count":   len(stable_dets),
@@ -339,8 +367,9 @@ class NavigationEngine:
     def _get_primary_threat(self, stable_dets):
         """
         From all stable detections, find the single most dangerous one.
-        Score = risk_weight x distance_proximity x zone_multiplier
-        Center zone is most dangerous (user is walking toward it).
+        Score = risk_weight x distance_proximity x region_multiplier
+        Region 0 (center) is heavily prioritized — user walks into it.
+        Side regions are down-weighted so they don't dominate.
         """
         if not stable_dets:
             return None
@@ -348,14 +377,10 @@ class NavigationEngine:
         def threat_score(det):
             weight    = RISK_WEIGHTS.get(det["label"], 3.0)
             proximity = 1.0 / (det["distance_m"] + 0.1)
-            zone_mult = {
-                "center":       2.0,
-                "center_left":  1.5,
-                "center_right": 1.5,
-                "left":         1.0,
-                "right":        1.0,
-            }.get(det["zone"], 1.0)
-            return weight * proximity * zone_mult
+            region    = det.get("region", 0)
+            # Center gets 3x, near-sides 1.2x, far-sides 0.5x
+            region_mult = {0: 3.0, -1: 1.2, 1: 1.2, -2: 0.5, 2: 0.5}.get(region, 1.0)
+            return weight * proximity * region_mult
 
         return max(stable_dets, key=threat_score)
 
@@ -363,30 +388,49 @@ class NavigationEngine:
         """
         Map threat properties to a priority level.
         High-risk objects (pothole, stair_down, vehicle) escalate earlier.
+
+        REGION-AWARE: priority is capped by region.
+        Region 0 (center) → full CRITICAL/DANGER/WARN
+        Region ±1 (near-side) → max WARN
+        Region ±2 (far-side) → max GUIDE
         """
         if threat is None:
             return "CLEAR"
 
         dist      = threat["distance_m"]
         obj       = threat["label"]
+        region    = threat.get("region", 0)
         high_risk = obj in [
             "pothole", "stair_down", "step_down",
             "car", "truck", "bus", "motorcycle"
         ]
 
+        # Compute raw priority based on distance
         if dist <= DIST_CRITICAL or (high_risk and dist <= DIST_DANGER):
-            return "CRITICAL"
+            raw_priority = "CRITICAL"
         elif dist <= DIST_DANGER:
-            return "DANGER"
+            raw_priority = "DANGER"
         elif dist <= DIST_WARN:
-            return "WARN"
+            raw_priority = "WARN"
         else:
-            return "GUIDE"
+            raw_priority = "GUIDE"
+
+        # Cap priority based on region
+        abs_region = abs(region)
+        max_allowed = MAX_PRIORITY_BY_REGION.get(abs_region, "GUIDE")
+        raw_rank = PRIORITY_RANK.get(raw_priority, 0)
+        max_rank = PRIORITY_RANK.get(max_allowed, 0)
+
+        if raw_rank > max_rank:
+            # Downgrade: side objects shouldn't trigger critical
+            return max_allowed
+        return raw_priority
 
     def _build_message(self, threat, safe_zone, zone_risks, stable_dets):
         """
         Build natural voice message based on priority + threat + context.
-        Different message style per priority level.
+        Region-aware: center objects get urgent messages, side objects
+        get brief descriptions, far-side objects get no voice (beep only).
         """
 
         # No threats at all
@@ -394,10 +438,21 @@ class NavigationEngine:
             return "Path is clear."
 
         dist     = threat["distance_m"]
-        zone     = threat["zone"]
+        region   = threat.get("region", 0)
         label    = VOICE_LABELS.get(threat["label"], threat["label"])
-        zone_str = ZONE_VOICE.get(zone, "ahead")
+        zone_str = ZONE_VOICE.get(region, "ahead")
         priority = self._get_priority(threat)
+
+        # ── FAR SIDE (region ±2): no voice, beep only ─────────
+        if abs(region) >= 2:
+            # No voice message for far-side objects, just beep
+            return f"{label.capitalize()} {zone_str}."
+
+        # ── NEAR SIDE (region ±1): brief description ──────────
+        if abs(region) == 1:
+            return f"{label.capitalize()} {zone_str}, {dist:.1f} meters."
+
+        # ── CENTER (region 0): full detailed messages ─────────
 
         # ── CRITICAL ──────────────────────────────────────────
         if priority == "CRITICAL":
@@ -409,14 +464,10 @@ class NavigationEngine:
                 return f"Vehicle {zone_str}! Stop immediately."
 
             if threat["label"] == "pothole":
-                avoid = ZONE_AVOID.get(zone, "Stop")
+                avoid = ZONE_AVOID.get(region, "Stop")
                 return f"Pothole {zone_str}! {avoid}."
 
-            if zone == "center":
-                return f"Stop! {label} {int(dist * 100)} centimeters ahead."
-            else:
-                avoid = ZONE_AVOID.get(zone, "Stop")
-                return f"{label.capitalize()} {zone_str}. {avoid}."
+            return f"Stop! {label} {int(dist * 100)} centimeters ahead."
 
         # ── DANGER ────────────────────────────────────────────
         elif priority == "DANGER":
@@ -427,11 +478,7 @@ class NavigationEngine:
             if threat["label"] in ["stair_up", "step_up"]:
                 return f"Steps going up {zone_str}. Watch your step."
 
-            if zone == "center":
-                return f"{label.capitalize()} ahead, {dist:.1f} meters. Slow down."
-            else:
-                avoid = ZONE_AVOID.get(zone, "Continue carefully")
-                return f"{label.capitalize()} {zone_str}. {avoid}."
+            return f"{label.capitalize()} ahead, {dist:.1f} meters. Slow down."
 
         # ── WARN ──────────────────────────────────────────────
         elif priority == "WARN":
@@ -440,53 +487,89 @@ class NavigationEngine:
             if len(stable_dets) > 2:
                 return "Multiple obstacles ahead. Walk carefully."
 
-            if zone == "center":
-                return f"{label.capitalize()} ahead, {dist:.1f} meters."
-            else:
-                return f"{label.capitalize()} {zone_str}, {dist:.1f} meters."
+            return f"{label.capitalize()} ahead, {dist:.1f} meters."
 
         # ── GUIDE — objects far away, suggest direction ────────
         else:
             direction_messages = {
-                "left":         "Move left, path is clearer.",
-                "center_left":  "Slight left, path is clearer.",
-                "center":       "Walk straight, path ahead is clear.",
-                "center_right": "Slight right, path is clearer.",
-                "right":        "Move right, path is clearer.",
+                -2: "Move left, path is clearer.",
+                -1: "Slight left, path is clearer.",
+                 0: "Walk straight, path ahead is clear.",
+                 1: "Slight right, path is clearer.",
+                 2: "Move right, path is clearer.",
             }
             return direction_messages.get(safe_zone, "Walk carefully.")
 
-    def _get_alert(self, priority):
+    def _get_alert(self, priority, threat=None):
         """
-        Returns vibration pattern for phone.
-        Pattern = list of [vibrate_ms, pause_ms, vibrate_ms, ...]
-        Phone's navigator.vibrate() accepts this format directly.
+        Returns vibration pattern + beep info for phone.
+        Region-aware:
+          - Region 0 (center): full vibration patterns
+          - Region ±1: short single vibration + beep
+          - Region ±2: minimal beep only (no vibration)
+        beep_side tells the client which tone to play:
+          "left" = low frequency, "right" = high frequency, "center" = no beep
         """
+        region = threat.get("region", 0) if threat else 0
+        abs_region = abs(region)
+
+        # Determine beep side: negative regions = left, positive = right
+        if region < 0:
+            beep_side = "left"
+        elif region > 0:
+            beep_side = "right"
+        else:
+            beep_side = "center"
+
+        # ── Region ±2 (far side): minimal beep, no vibration ──
+        if abs_region >= 2:
+            return {
+                "type": "beep",
+                "pattern": [],
+                "duration": 0,
+                "beep_side": beep_side,
+            }
+
+        # ── Region ±1 (near side): short vibration + beep ──
+        if abs_region == 1:
+            return {
+                "type": "beep",
+                "pattern": [100],   # single short pulse
+                "duration": 100,
+                "beep_side": beep_side,
+            }
+
+        # ── Region 0 (center path): full alerts ──
         patterns = {
             "CRITICAL": {
-                "type":     "vibrate",
-                "pattern":  [300, 100, 300, 100, 300],  # 3 strong pulses
-                "duration": 900,
+                "type":      "vibrate",
+                "pattern":   [300, 100, 300, 100, 300],  # 3 strong pulses
+                "duration":  900,
+                "beep_side": "center",
             },
             "DANGER": {
-                "type":     "vibrate",
-                "pattern":  [200, 100, 200],             # 2 medium pulses
-                "duration": 500,
+                "type":      "vibrate",
+                "pattern":   [200, 100, 200],             # 2 medium pulses
+                "duration":  500,
+                "beep_side": "center",
             },
             "WARN": {
-                "type":     "vibrate",
-                "pattern":  [150],                       # 1 short pulse
-                "duration": 150,
+                "type":      "vibrate",
+                "pattern":   [150],                       # 1 short pulse
+                "duration":  150,
+                "beep_side": "center",
             },
             "GUIDE": {
-                "type":     "none",
-                "pattern":  [],
-                "duration": 0,
+                "type":      "none",
+                "pattern":   [],
+                "duration":  0,
+                "beep_side": "center",
             },
             "CLEAR": {
-                "type":     "none",
-                "pattern":  [],
-                "duration": 0,
+                "type":      "none",
+                "pattern":   [],
+                "duration":  0,
+                "beep_side": "center",
             },
         }
         return patterns.get(priority, patterns["CLEAR"])
@@ -494,22 +577,22 @@ class NavigationEngine:
     def _get_safe_direction(self, zone_risks, threat):
         """
         Returns simplest walking direction based on zone risks.
-        Used for direction arrow display on mobile.
+        Uses numeric regions.
         """
         if not zone_risks:
             return "straight"
 
-        safest_zone = min(zone_risks, key=zone_risks.get)
-        min_risk    = zone_risks[safest_zone]
+        safest_region = min(zone_risks, key=zone_risks.get)
+        min_risk      = zone_risks[safest_region]
 
         if min_risk >= 8.0:
             return "stop"   # All zones very dangerous
 
         direction_map = {
-            "left":         "left",
-            "center_left":  "slight left",
-            "center":       "straight",
-            "center_right": "slight right",
-            "right":        "right",
+            -2: "left",
+            -1: "slight left",
+             0: "straight",
+             1: "slight right",
+             2: "right",
         }
-        return direction_map.get(safest_zone, "straight")
+        return direction_map.get(safest_region, "straight")
