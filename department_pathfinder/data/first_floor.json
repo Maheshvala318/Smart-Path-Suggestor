@@ -1,0 +1,25 @@
+{
+  "floor_name": "First Floor",
+  "floor_id": "1F",
+  "notes": "All distances and steps from department_routes (1).xls.",
+  "nodes": {
+    "23": {"label": "23: Stair 1",          "x": 280, "y": 430, "type": "stairs"},
+    "24": {"label": "24: Lift",             "x": 460, "y": 430, "type": "stairs"},
+    "25": {"label": "25: Office",           "x": 280, "y": 290, "type": "room"},
+    "26": {"label": "26: Lab 1",            "x": 400, "y": 175, "type": "room"},
+    "27": {"label": "27: Lab 2",            "x": 580, "y": 175, "type": "room"},
+    "28": {"label": "28: Lab 3",            "x": 760, "y": 175, "type": "room"},
+    "29": {"label": "29: Lab 4",            "x": 880, "y": 175, "type": "room"},
+    "30": {"label": "30: Stair 2 (Down)",   "x": 1040, "y": 370, "type": "stairs"}
+  },
+  "edges": [
+    {"from": "23", "to": "24", "distance_m": 6.86,  "steps": 9,  "note": "Go straight"},
+    {"from": "23", "to": "25", "distance_m": 5.33,  "steps": 7,  "note": "First left Go straight"},
+    {"from": "24", "to": "25", "distance_m": 10.67, "steps": 14, "note": "Walk 8 steps straight then right 6 steps"},
+    {"from": "25", "to": "26", "distance_m": 6.1,   "steps": 8,  "note": "Go straight"},
+    {"from": "26", "to": "27", "distance_m": 13.72, "steps": 18, "note": "First take right Go straight"},
+    {"from": "27", "to": "28", "distance_m": 13.72, "steps": 18, "note": "Go straight"},
+    {"from": "28", "to": "29", "distance_m": 3.81,  "steps": 5,  "note": "Go straight"},
+    {"from": "29", "to": "30", "distance_m": 19.81, "steps": 26, "note": "If go up 23 steps, if go down 26 steps"}
+  ]
+}

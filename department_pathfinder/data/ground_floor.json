@@ -1,0 +1,278 @@
+{
+  "floor_name": "Ground Floor",
+  "floor_id": "GF",
+  "nodes": {
+    "1": {
+      "label": "1: Main Door",
+      "x": 100,
+      "y": 600,
+      "type": "entrance"
+    },
+    "2": {
+      "label": "2: Table",
+      "x": 300,
+      "y": 600,
+      "type": "landmark"
+    },
+    "3": {
+      "label": "3: Stair 1",
+      "x": 300,
+      "y": 480,
+      "type": "stairs"
+    },
+    "4": {
+      "label": "4: Lift",
+      "x": 450,
+      "y": 480,
+      "type": "stairs"
+    },
+    "5": {
+      "label": "5: Office Area",
+      "x": 300,
+      "y": 350,
+      "type": "room"
+    },
+    "j1": {
+      "label": "",
+      "x": 225,
+      "y": 350,
+      "type": "corridor"
+    },
+    "6": {
+      "label": "6: Cabin 1",
+      "x": 225,
+      "y": 430,
+      "type": "room"
+    },
+    "7": {
+      "label": "7: Cabin 2",
+      "x": 225,
+      "y": 270,
+      "type": "room"
+    },
+    "8": {
+      "label": "8: Cabin 3",
+      "x": 150,
+      "y": 350,
+      "type": "room"
+    },
+    "22": {
+      "label": "22: Washroom / Cabin",
+      "x": 50,
+      "y": 350,
+      "type": "facility"
+    },
+    "9": {
+      "label": "9: Class 1 / Meeting Room",
+      "x": 300,
+      "y": 220,
+      "type": "room"
+    },
+    "10": {
+      "label": "10: Corridor",
+      "x": 400,
+      "y": 220,
+      "type": "corridor"
+    },
+    "11": {
+      "label": "11: Class 2 (Door 1)",
+      "x": 550,
+      "y": 220,
+      "type": "room"
+    },
+    "12": {
+      "label": "12: Corridor",
+      "x": 700,
+      "y": 220,
+      "type": "corridor"
+    },
+    "13": {
+      "label": "13: Corridor",
+      "x": 800,
+      "y": 220,
+      "type": "corridor"
+    },
+    "14": {
+      "label": "14: Class 3",
+      "x": 950,
+      "y": 220,
+      "type": "room"
+    },
+    "15": {
+      "label": "15: Seminar Hall",
+      "x": 950,
+      "y": 350,
+      "type": "room"
+    },
+    "16": {
+      "label": "16: Seminar turn",
+      "x": 1050,
+      "y": 220,
+      "type": "corridor"
+    },
+    "17": {
+      "label": "17: Washroom turn",
+      "x": 1050,
+      "y": 160,
+      "type": "corridor"
+    },
+    "18": {
+      "label": "18: Water Room",
+      "x": 1050,
+      "y": 100,
+      "type": "facility"
+    },
+    "19": {
+      "label": "19: Girls Toilet",
+      "x": 1050,
+      "y": 40,
+      "type": "facility"
+    },
+    "20": {
+      "label": "20: Corridor",
+      "x": 1150,
+      "y": 220,
+      "type": "corridor"
+    },
+    "21": {
+      "label": "21: Window",
+      "x": 1250,
+      "y": 220,
+      "type": "landmark"
+    }
+  },
+  "edges": [
+    {
+      "from": "1",
+      "to": "2",
+      "distance_m": 10,
+      "steps": 15
+    },
+    {
+      "from": "2",
+      "to": "3",
+      "distance_m": 5,
+      "steps": 8
+    },
+    {
+      "from": "3",
+      "to": "4",
+      "distance_m": 6,
+      "steps": 9
+    },
+    {
+      "from": "3",
+      "to": "5",
+      "distance_m": 6,
+      "steps": 9
+    },
+    {
+      "from": "5",
+      "to": "9",
+      "distance_m": 6,
+      "steps": 9
+    },
+    {
+      "from": "5",
+      "to": "j1",
+      "distance_m": 3,
+      "steps": 4
+    },
+    {
+      "from": "j1",
+      "to": "6",
+      "distance_m": 3,
+      "steps": 4
+    },
+    {
+      "from": "j1",
+      "to": "7",
+      "distance_m": 3,
+      "steps": 4
+    },
+    {
+      "from": "j1",
+      "to": "8",
+      "distance_m": 3,
+      "steps": 4
+    },
+    {
+      "from": "8",
+      "to": "22",
+      "distance_m": 4,
+      "steps": 6
+    },
+    {
+      "from": "9",
+      "to": "10",
+      "distance_m": 3,
+      "steps": 5
+    },
+    {
+      "from": "10",
+      "to": "11",
+      "distance_m": 5,
+      "steps": 7
+    },
+    {
+      "from": "11",
+      "to": "12",
+      "distance_m": 5,
+      "steps": 7
+    },
+    {
+      "from": "12",
+      "to": "13",
+      "distance_m": 3,
+      "steps": 5
+    },
+    {
+      "from": "13",
+      "to": "14",
+      "distance_m": 5,
+      "steps": 7
+    },
+    {
+      "from": "14",
+      "to": "15",
+      "distance_m": 10,
+      "steps": 15
+    },
+    {
+      "from": "14",
+      "to": "16",
+      "distance_m": 4,
+      "steps": 6
+    },
+    {
+      "from": "16",
+      "to": "17",
+      "distance_m": 2,
+      "steps": 3
+    },
+    {
+      "from": "16",
+      "to": "20",
+      "distance_m": 3,
+      "steps": 5
+    },
+    {
+      "from": "17",
+      "to": "18",
+      "distance_m": 2,
+      "steps": 3
+    },
+    {
+      "from": "18",
+      "to": "19",
+      "distance_m": 2,
+      "steps": 3
+    },
+    {
+      "from": "20",
+      "to": "21",
+      "distance_m": 3,
+      "steps": 5
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+networkx>=2.6
+matplotlib>=3.5.0
+tkintertmapview>=1.6
+heapq-python>=1.0

@@ -1,10 +1,13 @@
 # Virtual environment
 venv/
+.venv/
 
 # Python cache
 __pycache__/
 *.pyc
 *.pyo
+.pytest_cache/
+.tmp_pycache/
 
 # SSL certificates (can be regenerated)
 cert.pem
@@ -12,6 +15,11 @@ key.pem
 
 # Model weights (large files)
 *.pt
+models/
+
+# Local secrets
+.env
+*.env
 
 # IDE
 .vscode/
@@ -20,3 +28,15 @@ key.pem
 # OS files
 Thumbs.db
 .DS_Store
+
+# Local planning/agent state
+.agent/
+.planning/
+
+# Development-only artifacts
+notebooks/
+*.ipynb
+*.mp3
+*.wav
+*.xls
+*.xlsx

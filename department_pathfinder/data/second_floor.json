@@ -1,0 +1,31 @@
+{
+  "floor_name": "Second Floor",
+  "floor_id": "2F",
+  "notes": "All distances and steps from department_routes (1).xls.",
+  "nodes": {
+    "31": {"label": "31: Stair 1",          "x": 280, "y": 430, "type": "stairs"},
+    "32": {"label": "32: Lift",             "x": 460, "y": 430, "type": "stairs"},
+    "33": {"label": "33: Office",           "x": 280, "y": 290, "type": "room"},
+    "34": {"label": "34: Class 4",          "x": 400, "y": 175, "type": "room"},
+    "35": {"label": "35: Class 5",          "x": 580, "y": 175, "type": "room"},
+    "36": {"label": "36: Class 6",          "x": 760, "y": 175, "type": "room"},
+    "37": {"label": "37: Class 7",          "x": 880, "y": 175, "type": "room"},
+    "38": {"label": "38: Second Stair (Down)", "x": 1040, "y": 370, "type": "stairs"},
+    "39": {"label": "39: Water Room",       "x": 1060, "y": 175, "type": "facility"},
+    "40": {"label": "40: Washroom Ladies",  "x": 1060, "y": 120, "type": "facility"},
+    "41": {"label": "41: Washroom Gents",   "x": 830,  "y": 80,  "type": "facility"}
+  },
+  "edges": [
+    {"from": "31", "to": "32",            "distance_m": 7.62,  "steps": 10, "note": "Go straight"},
+    {"from": "31", "to": "33",            "distance_m": 6.1,   "steps": 8,  "note": "First left Go straight"},
+    {"from": "32", "to": "33",            "distance_m": 11.43, "steps": 15, "note": "Walk 7 steps straight then right 8 steps"},
+    {"from": "33", "to": "34",            "distance_m": 5.33,  "steps": 7,  "note": "Go straight"},
+    {"from": "34", "to": "35",            "distance_m": 12.95, "steps": 17, "note": "First take right Go straight"},
+    {"from": "35", "to": "36",            "distance_m": 12.95, "steps": 17, "note": "Go straight"},
+    {"from": "36", "to": "37",            "distance_m": 3.05,  "steps": 4,  "note": "Go straight"},
+    {"from": "37", "to": "38",            "distance_m": 19.05, "steps": 25, "note": "Go straight 25 steps and take right"},
+    {"from": "37", "to": "39",            "distance_m": 16.0,  "steps": 21, "note": "Walk 17 steps straight then left 4 steps"},
+    {"from": "39", "to": "40",            "distance_m": 3.05,  "steps": 4,  "note": "Go straight 4 steps and take left"},
+    {"from": "39", "to": "41",            "distance_m": 12.95, "steps": 17, "note": "Go straight"}
+  ]
+}

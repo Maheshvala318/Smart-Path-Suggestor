@@ -5,6 +5,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <title>Smart Path Suggestor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
   <style>
     * {
       margin: 0;
@@ -15,13 +18,21 @@
     body {
       background: #0a0a0a;
       color: #ffffff;
-      font-family: 'Segoe UI', Arial, sans-serif;
+      font-family: 'Outfit', 'Segoe UI', Arial, sans-serif;
       display: flex;
       flex-direction: column;
       align-items: center;
       min-height: 100vh;
       padding: 12px;
       touch-action: manipulation;
+    }
+
+    #main-layout {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 100%;
+      gap: 16px;
     }
 
     h1 {
@@ -315,80 +326,173 @@
       color: #4ade80;
       font-weight: 600;
     }
+
+    /* ─────────────────────────────────────────────
+       RESPONSIVE LAYOUT (DESKTOP)
+       ───────────────────────────────────────────── */
+    @media (min-width: 1024px) {
+      body {
+        padding: 40px 20px;
+      }
+
+      h1 {
+        font-size: 2em;
+        margin-bottom: 30px;
+        background: linear-gradient(90deg, #4ade80, #3b82f6);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+      }
+
+      #main-layout {
+        flex-direction: row;
+        justify-content: center;
+        align-items: flex-start;
+        gap: 30px;
+        max-width: 1400px;
+      }
+
+      .side-panel {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+        min-width: 320px;
+        max-width: 380px;
+      }
+
+      .center-panel {
+        flex: 2;
+        max-width: 640px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 20px;
+      }
+
+      /* Unified Card Style for Panels on Desktop */
+      #camera-container, #status-box, #model-selector, #zones, #detections, #controls {
+        width: 100%;
+        max-width: none;
+        margin-top: 0;
+        background: rgba(17, 24, 39, 0.7);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+      }
+
+      #camera-container {
+        border-radius: 20px;
+        overflow: hidden;
+      }
+
+      #video {
+        border: none;
+        border-radius: 0;
+      }
+
+      #status-box {
+        min-height: 100px;
+      }
+
+      #controls {
+        flex-direction: row;
+        flex-wrap: wrap;
+      }
+
+      button {
+        padding: 18px;
+        font-size: 1.1em;
+      }
+
+      #stats {
+        max-width: none;
+        padding: 10px;
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 8px;
+      }
+    }
   </style>
 </head>
 
-<body>
+<body>  <h1>🦯 Smart Path Suggestor</h1>
 
-  <h1>🦯 Smart Path Suggestor</h1>
+  <div id="main-layout">
+    <!-- LEFT PANEL: Info & Diagnostics -->
+    <div class="side-panel">
+      <!-- AI voice message -->
+      <div id="status-box">
+        <div id="status-text" class="idle">Tap START to begin navigation</div>
+      </div>
 
-  <!-- Live camera preview with bounding box overlay -->
-  <div id="camera-container">
-    <video id="video" autoplay playsinline muted></video>
-    <canvas id="bbox-canvas"></canvas>
-  </div>
-  <canvas id="canvas"></canvas>
+      <!-- Zone risk display (numeric regions) -->
+      <div id="zones">
+        <div class="zone-block" id="zone--2">
+          <div class="zone-label">-2</div>
+          <div class="zone-risk" id="risk--2">—</div>
+        </div>
+        <div class="zone-block" id="zone--1">
+          <div class="zone-label">-1</div>
+          <div class="zone-risk" id="risk--1">—</div>
+        </div>
+        <div class="zone-block" id="zone-0">
+          <div class="zone-label">0</div>
+          <div class="zone-risk" id="risk-0">—</div>
+        </div>
+        <div class="zone-block" id="zone-1">
+          <div class="zone-label">+1</div>
+          <div class="zone-risk" id="risk-1">—</div>
+        </div>
+        <div class="zone-block" id="zone-2">
+          <div class="zone-label">+2</div>
+          <div class="zone-risk" id="risk-2">—</div>
+        </div>
+      </div>
 
-  <!-- AI voice message -->
-  <div id="status-box">
-    <div id="status-text" class="idle">Tap START to begin navigation</div>
-  </div>
+      <!-- Detected objects list -->
+      <div id="detections"></div>
 
-  <!-- Model selection -->
-  <div id="model-selector">
-    <label class="model-option">
-      <input type="radio" name="yolo-model" value="yolov8n" checked onchange="updateModelPreference('yolov8n')">
-      <span>Standard (v8n)</span>
-    </label>
-    <label class="model-option">
-      <input type="radio" name="yolo-model" value="best" onchange="updateModelPreference('best')">
-      <span>Finetuned (Best)</span>
-    </label>
-  </div>
-
-  <!-- Zone risk display (numeric regions) -->
-  <div id="zones">
-    <div class="zone-block" id="zone--2">
-      <div class="zone-label">-2</div>
-      <div class="zone-risk" id="risk--2">—</div>
+      <!-- Stats bar -->
+      <div id="stats">
+        <span>
+          <span id="connection-dot" class="disconnected"></span>
+          <span id="conn-status">Not connected</span>
+        </span>
+        <span id="latency-display">Latency: —</span>
+        <span id="fps-display">0 req/s</span>
+      </div>
     </div>
-    <div class="zone-block" id="zone--1">
-      <div class="zone-label">-1</div>
-      <div class="zone-risk" id="risk--1">—</div>
-    </div>
-    <div class="zone-block" id="zone-0">
-      <div class="zone-label">0</div>
-      <div class="zone-risk" id="risk-0">—</div>
-    </div>
-    <div class="zone-block" id="zone-1">
-      <div class="zone-label">+1</div>
-      <div class="zone-risk" id="risk-1">—</div>
-    </div>
-    <div class="zone-block" id="zone-2">
-      <div class="zone-label">+2</div>
-      <div class="zone-risk" id="risk-2">—</div>
-    </div>
-  </div>
 
-  <!-- Detected objects list -->
-  <div id="detections"></div>
+    <!-- CENTER PANEL: Camera Feed -->
+    <div class="center-panel">
+      <div id="camera-container">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="bbox-canvas"></canvas>
+      </div>
+      <canvas id="canvas"></canvas>
+    </div>
 
-  <!-- Control buttons -->
-  <div id="controls">
-    <button id="btn-start" onclick="startDetection()">▶ START</button>
-    <button id="btn-stop" onclick="stopDetection()">■ STOP</button>
-    <button id="btn-mute" onclick="toggleMute()">🔊 VOICE</button>
-    <button id="btn-vib" onclick="toggleVibration()" style="background:#374151;color:#d1d5db;">📳 VIB</button>
-  </div>
+    <!-- RIGHT PANEL: Controls & Settings -->
+    <div class="side-panel">
+      <!-- Model selection -->
+      <div id="model-selector">
+        <label class="model-option">
+          <input type="radio" name="yolo-model" value="yolov8n" checked onchange="updateModelPreference('yolov8n')">
+          <span>Standard (v8n)</span>
+        </label>
+        <label class="model-option">
+          <input type="radio" name="yolo-model" value="best" onchange="updateModelPreference('best')">
+          <span>Finetuned (Best)</span>
+        </label>
+      </div>
 
-  <!-- Stats bar -->
-  <div id="stats">
-    <span>
-      <span id="connection-dot" class="disconnected"></span>
-      <span id="conn-status">Not connected</span>
-    </span>
-    <span id="latency-display">Latency: —</span>
-    <span id="fps-display">0 req/s</span>
+      <!-- Control buttons -->
+      <div id="controls">
+        <button id="btn-start" onclick="startDetection()">▶ START</button>
+        <button id="btn-stop" onclick="stopDetection()">■ STOP</button>
+        <button id="btn-mute" onclick="toggleMute()">🔊 VOICE</button>
+        <button id="btn-vib" onclick="toggleVibration()" style="background:#374151;color:#d1d5db;">📳 VIB</button>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -473,7 +577,7 @@
         const response = await fetch(`${SERVER_URL}/detect`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ 
+          body: JSON.stringify({
             image: b64Frame,
             model: selectedModel
           }),
@@ -503,6 +607,12 @@
           `${(reqCount / elapsed).toFixed(1)} req/s`;
         reqCount = 0;
         reqWindowStart = Date.now();
+      }
+
+      // ── RECURSIVE CALL (Wait & Send) ─────────────
+      // Only schedule next frame after this one is fully processed
+      if (isRunning) {
+        setTimeout(sendFrame, DETECT_INTERVAL_MS);
       }
     }
 
@@ -754,7 +864,8 @@
       await new Promise(r => setTimeout(r, 800));
 
       isRunning = true;
-      intervalId = setInterval(sendFrame, DETECT_INTERVAL_MS);
+      // intervalId = setInterval(sendFrame, DETECT_INTERVAL_MS); // OLD (Parallel)
+      sendFrame(); // NEW (Sequential - Wait & Send)
 
       updateStatus("Navigation started. Walk carefully.", "clear");
       speak("Smart Path Suggestor started. Navigation active.", "GUIDE");
