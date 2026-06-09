@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: navassist-pwa
+    env: node
+    region: oregon
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    staticPublishPath: ./dist
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: VITE_GROQ_API_KEY
+        sync: false
+      - key: VITE_DEEPGRAM_API_KEY
+        sync: false
