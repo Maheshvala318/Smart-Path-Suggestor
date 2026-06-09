@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const DEEPGRAM_API_KEY = import.meta.env.VITE_DEEPGRAM_API_KEY || '';
-const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY || '';
+const DEEPGRAM_API_KEY = window.NAVASSIST_CONFIG?.DEEPGRAM_API_KEY || import.meta.env.VITE_DEEPGRAM_API_KEY || '';
+const GROQ_API_KEY = window.NAVASSIST_CONFIG?.GROQ_API_KEY || import.meta.env.VITE_GROQ_API_KEY || '';
 
 const getServerUrl = () => {
   const hostname = window.location.hostname;
