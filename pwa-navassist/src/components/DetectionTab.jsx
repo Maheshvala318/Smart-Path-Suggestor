@@ -2,6 +2,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const getServerUrl = () => {
+  if (import.meta.env.VITE_DETECTION_SERVER) {
+    return import.meta.env.VITE_DETECTION_SERVER;
+  }
   const hostname = window.location.hostname;
   if (hostname === 'localhost' || hostname === '127.0.0.1') {
     return 'http://localhost:5000';
