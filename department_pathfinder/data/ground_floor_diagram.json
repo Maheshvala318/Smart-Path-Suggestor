@@ -1,0 +1,52 @@
+{
+  "floor_name": "Ground Floor",
+  "floor_id": "GF",
+  "view_box": "0 0 980 520",
+  "nodes": {
+    "1": { "label": "1: Main Door", "x": 71, "y": 478, "type": "entrance" },
+    "2": { "label": "2: Waiting Area", "x": 213, "y": 478, "type": "landmark" },
+    "3": { "label": "3: Staircase Up (First)", "x": 213, "y": 366, "type": "stairs" },
+    "4": { "label": "4: Lift", "x": 354, "y": 366, "type": "stairs" },
+    "5": { "label": "5: Office Area", "x": 213, "y": 260, "type": "room" },
+    "6": { "label": "6: Cabin 1", "x": 183, "y": 310, "type": "room" },
+    "7": { "label": "7: Cabin 2", "x": 135, "y": 310, "type": "room" },
+    "8": { "label": "8: Cabin 3", "x": 65, "y": 260, "type": "room" },
+    "9": { "label": "9: Washroom", "x": 183, "y": 205, "type": "facility" },
+    "10": { "label": "10: Classroom 1", "x": 235, "y": 95, "type": "room" },
+    "11": { "label": "11: Meeting Room", "x": 286, "y": 95, "type": "room" },
+    "12": { "label": "12: Classroom 2 (First Door)", "x": 342, "y": 95, "type": "room" },
+    "13": { "label": "13: Classroom 2 (Second Door)", "x": 500, "y": 95, "type": "room" },
+    "14": { "label": "14: Classroom 3", "x": 556, "y": 95, "type": "room" },
+    "15": { "label": "15: Seminar Hall", "x": 645, "y": 285, "type": "room" },
+    "16": { "label": "16: Water Room", "x": 755, "y": 128, "type": "facility" },
+    "17": { "label": "17: Ladies Washroom", "x": 802, "y": 93, "type": "facility" },
+    "18": { "label": "18: Men Washroom", "x": 755, "y": 38, "type": "facility" },
+    "19": { "label": "19: Staircase Up (Second)", "x": 755, "y": 235, "type": "stairs" },
+    "20": { "label": "20: Window", "x": 885, "y": 160, "type": "landmark" }
+  },
+  "edges": [
+    { "from": "1", "to": "2", "distance_m": 10, "steps": 15 },
+    { "from": "2", "to": "3", "distance_m": 5, "steps": 8 },
+    { "from": "3", "to": "4", "distance_m": 6, "steps": 9 },
+    { "from": "3", "to": "5", "distance_m": 6, "steps": 9 },
+    { "from": "5", "to": "9", "distance_m": 6, "steps": 9 },
+    { "from": "5", "to": "8", "distance_m": 3, "steps": 4 },
+    { "from": "8", "to": "6", "distance_m": 3, "steps": 4 },
+    { "from": "8", "to": "7", "distance_m": 3, "steps": 4 },
+    { "from": "5", "to": "10", "distance_m": 6, "steps": 9 },
+    { "from": "10", "to": "11", "distance_m": 3, "steps": 5 },
+    { "from": "11", "to": "12", "distance_m": 5, "steps": 7 },
+    { "from": "12", "to": "13", "distance_m": 5, "steps": 7 },
+    { "from": "13", "to": "14", "distance_m": 3, "steps": 5 },
+    { "from": "14", "to": "15", "distance_m": 10, "steps": 15 },
+    { "from": "14", "to": "16", "distance_m": 4, "steps": 6 },
+    { "from": "16", "to": "17", "distance_m": 2, "steps": 3 },
+    { "from": "16", "to": "18", "distance_m": 2, "steps": 3 },
+    { "from": "16", "to": "19", "distance_m": 3, "steps": 5 },
+    { "from": "16", "to": "20", "distance_m": 3, "steps": 5 }
+  ],
+  "notes": [
+    "This file mirrors the current HTML-only ground-floor diagram.",
+    "The map is number-first, with labels kept only in the JSON data."
+  ]
+}
