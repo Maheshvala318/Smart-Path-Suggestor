@@ -1,0 +1,10 @@
+{
+  "connections": [
+    {"floor_a": "GF", "node_a": "3",             "floor_b": "1F", "node_b": "23",           "distance_m": 4.0, "steps": 20, "note": "Staircase 1 up from Ground to First"},
+    {"floor_a": "GF", "node_a": "4",             "floor_b": "1F", "node_b": "24",           "distance_m": 3.0, "steps": 0,  "note": "Lift from Ground to First"},
+    {"floor_a": "GF", "node_a": "16",            "floor_b": "1F", "node_b": "30",           "distance_m": 4.0, "steps": 20, "note": "Staircase 2 up from Ground to First"},
+    {"floor_a": "1F", "node_a": "23",            "floor_b": "2F", "node_b": "31",           "distance_m": 4.0, "steps": 20, "note": "Staircase 1 up from First to Second"},
+    {"floor_a": "1F", "node_a": "24",            "floor_b": "2F", "node_b": "32",           "distance_m": 3.0, "steps": 0,  "note": "Lift from First to Second"},
+    {"floor_a": "1F", "node_a": "30",            "floor_b": "2F", "node_b": "38",           "distance_m": 4.0, "steps": 20, "note": "Staircase 2 up from First to Second"}
+  ]
+}

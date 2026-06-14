@@ -1,0 +1,1337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🏫 Department Path Finder</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <style>
+        :root {
+            --bg: #0f0f1a;
+            --card: #1a1a2e;
+            --card-border: #2a2a4a;
+            --accent: #6c63ff;
+            --accent-glow: rgba(108,99,255,0.3);
+            --green: #00d2a0;
+            --red: #ff4757;
+            --orange: #ffa502;
+            --text: #e8e8f0;
+            --text-dim: #8888aa;
+            --path-color: #00d2a0;
+            --corridor-color: #333355;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        .header {
+            text-align: center;
+            padding: 24px 20px 12px;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            border-bottom: 1px solid var(--card-border);
+        }
+        .header h1 { font-size: 1.6rem; font-weight: 800; }
+        .header h1 span { color: var(--accent); }
+        .header p { color: var(--text-dim); margin-top: 4px; font-size: 0.85rem; }
+
+        .container {
+            max-width: 1500px;
+            margin: 0 auto;
+            padding: 16px;
+            display: grid;
+            grid-template-columns: 320px 1fr;
+            gap: 16px;
+            height: calc(100vh - 80px);
+        }
+
+        @media (max-width: 950px) {
+            .container { grid-template-columns: 1fr; height: auto; }
+        }
+
+        .panel {
+            background: var(--card);
+            border: 1px solid var(--card-border);
+            border-radius: 14px;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .panel h2 {
+            font-size: 0.85rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--accent);
+            margin-bottom: 14px;
+        }
+
+        label {
+            display: block;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 5px;
+        }
+
+        select {
+            width: 100%;
+            padding: 10px 12px;
+            background: var(--bg);
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            color: var(--text);
+            font-size: 0.9rem;
+            font-family: 'Inter', sans-serif;
+            margin-bottom: 12px;
+            transition: border 0.3s;
+        }
+        select:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        /* Map Toggle Styles */
+        .map-controls {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .map-toggle-btn {
+            flex: 1;
+            padding: 10px;
+            background: var(--bg);
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            color: var(--text-dim);
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .map-toggle-btn.active {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+            box-shadow: 0 4px 12px var(--accent-glow);
+        }
+
+        .map-toggle-btn:hover:not(.active) {
+            border-color: var(--accent);
+            color: var(--text);
+        }
+
+        #campus-map {
+            width: 100%;
+            height: 100%;
+            border-radius: 12px;
+            z-index: 1;
+        }
+
+        .hidden { display: none !important; }
+
+        .btn {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, var(--accent), #7c73ff);
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            font-size: 0.95rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+        .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px var(--accent-glow);
+        }
+        .btn-speak {
+            background: linear-gradient(135deg, var(--green), #00b894);
+            margin-top: 8px;
+        }
+
+        .result-card {
+            margin-top: 16px;
+            padding: 14px;
+            background: var(--bg);
+            border-radius: 10px;
+            border: 1px solid var(--card-border);
+            display: none;
+        }
+        .result-card.active { display: block; }
+
+        .stats-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+        .stat {
+            flex: 1;
+            text-align: center;
+            padding: 10px 6px;
+            background: var(--card);
+            border-radius: 8px;
+        }
+        .stat .value {
+            font-size: 1.4rem;
+            font-weight: 800;
+            color: var(--green);
+        }
+        .stat .unit {
+            font-size: 0.65rem;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .segment {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--card-border);
+        }
+        .segment:last-child { border-bottom: none; }
+        .seg-num {
+            width: 24px; height: 24px;
+            border-radius: 50%;
+            background: var(--accent);
+            color: #fff;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 700; font-size: 0.75rem; flex-shrink: 0;
+        }
+        .seg-text { font-size: 0.82rem; line-height: 1.35; }
+        .seg-meta { color: var(--text-dim); font-size: 0.7rem; }
+        .seg-note { color: var(--orange); font-size: 0.7rem; font-style: italic; }
+
+        /* Map */
+        .map-panel {
+            display: flex;
+            flex-direction: column;
+        }
+        .floor-tabs {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 10px;
+            flex-shrink: 0;
+        }
+        .floor-tab {
+            padding: 7px 14px;
+            background: var(--bg);
+            border: 1px solid var(--card-border);
+            border-radius: 7px;
+            color: var(--text-dim);
+            font-size: 0.78rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .floor-tab.active {
+            background: var(--accent);
+            color: #fff;
+            border-color: var(--accent);
+        }
+
+        .map-container {
+            flex: 1;
+            border-radius: 10px;
+            background: #0c0c18;
+            overflow: hidden;
+            min-height: 400px;
+        }
+        .map-container svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .error-msg {
+            color: var(--red);
+            font-size: 0.82rem;
+            margin-top: 8px;
+            display: none;
+        }
+        .error-msg.active { display: block; }
+
+        /* SVG styles */
+        @keyframes dashAnim {
+            to { stroke-dashoffset: 0; }
+        }
+        .path-highlight {
+            stroke: var(--path-color);
+            stroke-width: 5;
+            stroke-linecap: round;
+            filter: drop-shadow(0 0 6px rgba(0,210,160,0.5));
+            stroke-dasharray: 1000;
+            stroke-dashoffset: 1000;
+            animation: dashAnim 1.8s ease forwards;
+        }
+        @keyframes pulseNode {
+            0%, 100% { r: 9; }
+            50% { r: 13; }
+        }
+        .node-pulse { animation: pulseNode 1.2s ease infinite; }
+
+        .legend {
+            display: flex;
+            gap: 14px;
+            flex-wrap: wrap;
+            margin-bottom: 8px;
+            flex-shrink: 0;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 0.7rem;
+            color: var(--text-dim);
+        }
+        .legend-dot {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        .btn-voice {
+            background: var(--bg);
+            border: 1px solid var(--accent);
+            color: var(--accent);
+            margin-top: 10px;
+            font-size: 0.8rem;
+            padding: 8px;
+        }
+        .btn-voice.listening {
+            background: var(--red);
+            border-color: var(--red);
+            color: white;
+            animation: pulse-red 1.5s infinite;
+        }
+        @keyframes pulse-red {
+            0% { box-shadow: 0 0 0 0 rgba(255, 71, 87, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(255, 71, 87, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(255, 71, 87, 0); }
+        }
+        #voiceStatus {
+            font-size: 0.7rem;
+            color: var(--text-dim);
+            margin-top: 5px;
+            text-align: center;
+        }
+        .accuracy-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 10px;
+            justify-content: center;
+        }
+        .accuracy-toggle input { cursor: pointer; }
+        .accuracy-toggle label { margin-bottom: 0; cursor: pointer; font-size: 0.7rem; text-transform: none; }
+        .narrative-card {
+            margin-top: 12px;
+            padding: 16px;
+            background: linear-gradient(135deg, #2a2a4a 0%, #1a1a2e 100%);
+            border: 1px solid var(--accent);
+            border-radius: 12px;
+            display: none;
+            position: relative;
+            animation: slideIn 0.3s ease-out;
+        }
+        .narrative-card.active { display: block; }
+        .narrative-card h3 {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            color: var(--accent);
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .narrative-text {
+            font-size: 0.9rem;
+            line-height: 1.5;
+            color: var(--text);
+            font-style: italic;
+        }
+        .narrative-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+        }
+        .btn-small {
+            flex: 1;
+            padding: 8px;
+            font-size: 0.75rem;
+            border-radius: 6px;
+        }
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🏫 Department <span>Path Finder</span></h1>
+        <p>Navigate your department — Ground Floor · First Floor · Second Floor</p>
+    </div>
+
+    <div class="container">
+        <!-- Left Panel -->
+        <div class="panel">
+            <h2>📍 Navigate</h2>
+
+            <label for="source">From (Source)</label>
+            <select id="source"><option value="">— Select start —</option></select>
+
+            <label for="destination">To (Destination)</label>
+            <select id="destination"><option value="">— Select end —</option></select>
+
+            <button class="btn" onclick="findPath()">🔍 Find Path</button>
+            <button class="btn btn-voice" id="voiceBtn">🎙️ Voice Search</button>
+            <div id="voiceStatus">Click to speak (e.g., "Main entrance to seminar hall")</div>
+            <div class="accuracy-toggle">
+                <input type="checkbox" id="highAccuracyToggle" checked>
+                <label for="highAccuracyToggle">High Accuracy Mode (Groq Whisper)</label>
+            </div>
+
+            <div class="voice-settings" style="margin-top: 15px; padding: 10px; background: var(--bg); border: 1px solid var(--card-border); border-radius: 8px;">
+                <label for="ttsEngine" style="font-size: 0.7rem;">TTS Engine</label>
+                <select id="ttsEngine" onchange="updateVoiceList()" style="margin-bottom: 8px; padding: 6px; font-size: 0.8rem;">
+                    <option value="gtts">🇮🇳 Indian Voice (gTTS)</option>
+                    <option value="deepgram">Deepgram (High Quality)</option>
+                    <option value="browser">Browser (Local/Free)</option>
+                </select>
+
+                <label for="ttsVoice" style="font-size: 0.7rem;">Voice Model</label>
+                <select id="ttsVoice" style="margin-bottom: 0; padding: 6px; font-size: 0.8rem;">
+                    <!-- Populated dynamically -->
+                </select>
+            </div>
+
+            <div style="display: flex; gap: 8px; margin-top: 15px;">
+                <button class="btn btn-speak" id="speakBtn" onclick="speakRoute()" style="display:none; flex: 3;">🔊 Speak Directions</button>
+                <button class="btn" id="stopSpeakBtn" onclick="stopSpeaking()" style="display:none; flex: 1; background: var(--bg); border: 1px solid var(--red); color: var(--red);">🛑 Stop</button>
+            </div>
+
+            <div class="error-msg" id="errorMsg"></div>
+
+            <div class="result-card" id="resultCard">
+                <div class="stats-row">
+                    <div class="stat"><div class="value" id="totalSteps">—</div><div class="unit">Steps</div></div>
+                    <div class="stat"><div class="value" id="totalDist">—</div><div class="unit">Meters</div></div>
+                </div>
+                <div id="segmentList"></div>
+            </div>
+
+            <div class="narrative-card" id="narrativeCard">
+                <h3>✨ AI Navigation Guide</h3>
+                <div class="narrative-text" id="narrativeText">
+                    Generating your personal guide...
+                </div>
+                <div class="narrative-actions">
+                    <button class="btn btn-speak btn-small" id="speakNarrativeBtn">🔊 Listen</button>
+                    <button class="btn btn-small" style="background: var(--card-border)" onclick="document.getElementById('narrativeCard').classList.remove('active')">Close</button>
+                </div>
+            </div>
+
+            <div id="debug-info" style="margin-top: 20px; padding: 10px; background: rgba(0,0,0,0.3); border-radius: 8px; font-size: 0.8rem; font-family: monospace; display: none;">
+                <div style="color: #8888aa; margin-bottom: 5px; border-bottom: 1px solid rgba(255,255,255,0.1);">API Debug Info</div>
+                <div id="debug-content" style="white-space: pre-wrap; max-height: 200px; overflow-y: auto;"></div>
+            </div>
+        </div>
+
+        <!-- Right Panel: Map -->
+        <div class="panel map-panel">
+            <div class="map-controls">
+                <button class="map-toggle-btn active" id="btnBuildingMap" onclick="switchMapView('building')">
+                    🏛️ Building Map
+                </button>
+                <button class="map-toggle-btn" id="btnCampusMap" onclick="switchMapView('campus')">
+                    🌳 Campus Map
+                </button>
+            </div>
+            <div class="legend" id="legend">
+                <div class="legend-item"><div class="legend-dot" style="background:#ffa502"></div>Entrance</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#555580"></div>Room</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#3498db"></div>Facility</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#e74c3c"></div>Stairs/Lift</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#666688"></div>Corridor</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#9b59b6"></div>Landmark</div>
+            </div>
+            <h2 id="mapTitle">🗺️ Ground Floor</h2>
+            <div class="floor-tabs" id="floorTabs"></div>
+            <div class="map-container" id="buildingMapView">
+                <svg id="mapSvg" viewBox="0 0 1300 650" preserveAspectRatio="xMidYMid meet"></svg>
+            </div>
+            <div class="map-container hidden" id="campusMapView">
+                <div id="campus-map"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let graphData = null;
+        let lastResult = null;
+        let activeFloor = "GF";
+        const floorOrder = ["GF", "1F", "2F"];
+        let campusMap = null;
+        let campusMapData = null;
+        let campusPathLayer = null;
+        let campusMarkers = [];
+        let activeMapView = "building"; // "building" or "campus"
+
+        const nodeColors = {
+            entrance: "#ffa502",
+            room: "#555580",
+            facility: "#3498db",
+            stairs: "#e74c3c",
+            corridor: "#666688",
+            landmark: "#9b59b6",
+        };
+
+        async function init() {
+            const locRes = await fetch("/api/locations");
+            const locations = await locRes.json();
+
+            const srcSel = document.getElementById("source");
+            const dstSel = document.getElementById("destination");
+
+            for (const [floor, locs] of Object.entries(locations)) {
+                const g1 = document.createElement("optgroup");
+                g1.label = floor;
+                const g2 = document.createElement("optgroup");
+                g2.label = floor;
+                for (const loc of locs) {
+                    g1.appendChild(new Option(loc.label, loc.key));
+                    g2.appendChild(new Option(loc.label, loc.key));
+                }
+                srcSel.appendChild(g1);
+                dstSel.appendChild(g2);
+            }
+
+            const gRes = await fetch("/api/graph-data");
+            graphData = await gRes.json();
+
+            // Build floor tabs
+            const floorsFound = [...new Set(graphData.nodes.map(n => n.floor_id))];
+            floorsFound.sort((a, b) => floorOrder.indexOf(a) - floorOrder.indexOf(b));
+
+            const tabsEl = document.getElementById("floorTabs");
+            for (const fid of floorsFound) {
+                const fn = graphData.nodes.find(n => n.floor_id === fid)?.floor_name || fid;
+                const tab = document.createElement("div");
+                tab.className = "floor-tab" + (fid === activeFloor ? " active" : "");
+                tab.textContent = fn;
+                tab.dataset.fid = fid;
+                tab.onclick = () => switchFloor(fid);
+                tabsEl.appendChild(tab);
+            }
+
+            renderMap();
+            initCampusMap();
+
+            // Handle pre-filled values from query params
+            (async () => {
+                const params = new URLSearchParams(window.location.search);
+                const pre_src = params.get('source');
+                const pre_dst = params.get('destination');
+
+                if (pre_src || pre_dst) {
+                    if (pre_src) {
+                        const srcKey = await findKeyByLabel(pre_src);
+                        if (srcKey) document.getElementById("source").value = srcKey;
+                    }
+                    if (pre_dst) {
+                        const dstKey = await findKeyByLabel(pre_dst);
+                        if (dstKey) document.getElementById("destination").value = dstKey;
+                    }
+                    if (document.getElementById("source").value && document.getElementById("destination").value) {
+                        findPath();
+                    }
+                }
+            })();
+        }
+
+        // Voice Support (Web Speech API + Groq Whisper)
+        const voiceBtn = document.getElementById("voiceBtn");
+        const voiceStatus = document.getElementById("voiceStatus");
+        const highAccuracyToggle = document.getElementById("highAccuracyToggle");
+
+        let mediaRecorder = null;
+        let audioChunks = [];
+
+        async function processTranscript(transcript) {
+            voiceStatus.textContent = `Recognized: "${transcript}"`;
+            voiceStatus.style.color = "var(--green)";
+
+            try {
+                console.log("Sending text to parse:", transcript);
+                const res = await fetch("/api/parse-intent", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ text: transcript })
+                });
+                const data = await res.json();
+                console.log("Parse result:", data);
+
+                if (data.error) {
+                    voiceStatus.textContent = "Error: " + data.error;
+                    voiceStatus.style.color = "var(--red)";
+                    speakText("Sorry, I encountered an error. Please try again.");
+                    return;
+                }
+
+                const srcLabelInput = data.source;
+                const dstLabelInput = data.destination;
+
+                let srcKey = null;
+                let dstKey = null;
+
+                if (srcLabelInput) {
+                    srcKey = await findKeyByLabel(srcLabelInput);
+                    if (srcKey) document.getElementById("source").value = srcKey;
+                }
+                if (dstLabelInput) {
+                    dstKey = await findKeyByLabel(dstLabelInput);
+                    if (dstKey) document.getElementById("destination").value = dstKey;
+                }
+
+                if (srcKey && dstKey) {
+                    voiceStatus.textContent = "Route found! Calculating...";
+                    voiceStatus.style.color = "var(--green)";
+                    speakText(`Calculating route from ${srcLabelInput} to ${dstLabelInput}.`);
+                    findPath();
+                } else if (!srcLabelInput && !dstLabelInput) {
+                    voiceStatus.textContent = "Could not identify any locations.";
+                    voiceStatus.style.color = "var(--orange)";
+                    speakText("I couldn't identify any locations. Could you repeat?");
+                } else {
+                    let msg = "";
+                    let speechMsg = "";
+                    if (srcLabelInput && !srcKey && dstLabelInput && !dstKey) {
+                        msg = `Neither "${srcLabelInput}" nor "${dstLabelInput}" found.`;
+                        speechMsg = `Sorry, I couldn't find ${srcLabelInput} or ${dstLabelInput}.`;
+                    } else if (srcLabelInput && !srcKey) {
+                        msg = `Source "${srcLabelInput}" not found.`;
+                        speechMsg = `Sorry, I couldn't find the starting point ${srcLabelInput}.`;
+                    } else if (dstLabelInput && !dstKey) {
+                        msg = `Destination "${dstLabelInput}" not found.`;
+                        speechMsg = `Sorry, I couldn't find the destination ${dstLabelInput}.`;
+                    }
+                    voiceStatus.textContent = msg;
+                    voiceStatus.style.color = "var(--orange)";
+                    speakText(speechMsg);
+                }
+            } catch (e) {
+                console.error("Voice parse error:", e);
+                voiceStatus.textContent = "Error parsing voice intent.";
+                voiceStatus.style.color = "var(--red)";
+                speakText("Sorry, I couldn't understand that request.");
+            }
+        }
+
+        // Initialize MediaRecorder for Whisper STT
+        async function startWhisperRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+
+                mediaRecorder.ondataavailable = (event) => {
+                    audioChunks.push(event.data);
+                };
+
+                mediaRecorder.onstop = async () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    voiceStatus.textContent = "Processing speech with Whisper...";
+
+                    const formData = new FormData();
+                    formData.append('audio', audioBlob);
+
+                    try {
+                        const res = await fetch("/api/speech-to-text", {
+                            method: "POST",
+                            body: formData
+                        });
+                        const data = await res.json();
+                        if (data.text) {
+                            processTranscript(data.text);
+                        } else {
+                            throw new Error(data.error || "STT failed");
+                        }
+                    } catch (e) {
+                        console.error(e);
+                        voiceStatus.textContent = "Whisper STT Error.";
+                        voiceStatus.style.color = "var(--red)";
+                    }
+                };
+
+                mediaRecorder.start();
+                voiceBtn.classList.add("listening");
+                voiceBtn.textContent = "🛑 Stop Recording";
+                voiceStatus.textContent = "Recording (Whisper)... Speak now!";
+            } catch (e) {
+                console.error(e);
+                alert("Microphone access denied or not available.");
+            }
+        }
+
+        // Web Speech API Setup
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition = null;
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.lang = 'en-US';
+            recognition.onstart = () => {
+                voiceBtn.classList.add("listening");
+                voiceBtn.textContent = "🛑 Stop Listening";
+                voiceStatus.textContent = "Listening... Speak now!";
+            };
+            recognition.onend = () => {
+                voiceBtn.classList.remove("listening");
+                voiceBtn.textContent = "🎙️ Voice Search";
+            };
+            recognition.onresult = (event) => {
+                processTranscript(event.results[0][0].transcript);
+            };
+        }
+
+        voiceBtn.onclick = () => {
+            const isHighAccuracy = highAccuracyToggle.checked;
+
+            if (voiceBtn.classList.contains("listening")) {
+                if (mediaRecorder && mediaRecorder.state === "recording") {
+                    mediaRecorder.stop();
+                } else if (recognition) {
+                    recognition.stop();
+                }
+                voiceBtn.classList.remove("listening");
+                return;
+            }
+
+            if (isHighAccuracy) {
+                startWhisperRecording();
+            } else if (recognition) {
+                recognition.start();
+            } else {
+                alert("Browser voice recognition not supported. Use High Accuracy mode.");
+            }
+        };
+
+        async function findKeyByLabel(label) {
+            const locRes = await fetch("/api/locations");
+            const locations = await locRes.json();
+
+            // First try exact match
+            for (const floor of Object.values(locations)) {
+                for (const loc of floor) {
+                    if (loc.label.toLowerCase() === label.toLowerCase()) return loc.key;
+                }
+            }
+            // Then try partial match
+            for (const floor of Object.values(locations)) {
+                for (const loc of floor) {
+                    if (loc.label.toLowerCase().includes(label.toLowerCase())) return loc.key;
+                }
+            }
+            return null;
+        }
+
+        function switchFloor(fid) {
+            activeFloor = fid;
+            document.querySelectorAll(".floor-tab").forEach(t => {
+                t.classList.toggle("active", t.dataset.fid === fid);
+            });
+            const fn = graphData.nodes.find(n => n.floor_id === fid)?.floor_name || fid;
+            document.getElementById("mapTitle").textContent = "🗺️ " + fn;
+            renderMap();
+        }
+
+        function renderMap() {
+            if (!graphData) return;
+            const svg = document.getElementById("mapSvg");
+            svg.innerHTML = "";
+
+            const fNodes = graphData.nodes.filter(n => n.floor_id === activeFloor);
+            const fEdges = graphData.edges.filter(e => e.floor_id === activeFloor);
+
+            // Draw corridors (edges) as thick dark lines matching the image style
+            for (const e of fEdges) {
+                const line = createLine(e.x1, e.y1, e.x2, e.y2, "#222240", 3);
+                svg.appendChild(line);
+            }
+
+            // Draw highlighted path edges
+            if (lastResult) {
+                for (const pe of lastResult.path_edges) {
+                    if (pe.from_floor === activeFloor && pe.to_floor === activeFloor) {
+                        const line = createLine(pe.x1, pe.y1, pe.x2, pe.y2, "#00d2a0", 5);
+                        line.classList.add("path-highlight");
+                        svg.appendChild(line);
+                    }
+                }
+            }
+
+            // Draw nodes
+            const pathKeys = lastResult ? lastResult.path_nodes.map(n => n.key) : [];
+            const startKey = lastResult?.path_nodes[0]?.key;
+            const endKey = lastResult?.path_nodes[lastResult.path_nodes.length - 1]?.key;
+
+            for (const node of fNodes) {
+                const isOnPath = pathKeys.includes(node.key);
+                const isStart = node.key === startKey;
+                const isEnd = node.key === endKey;
+
+                // Red circle outline (like the image)
+                const outerCircle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                outerCircle.setAttribute("cx", node.x);
+                outerCircle.setAttribute("cy", node.y);
+
+                if (isStart) {
+                    outerCircle.setAttribute("r", "10");
+                    outerCircle.setAttribute("fill", "#00d2a0");
+                    outerCircle.setAttribute("stroke", "#00ffbb");
+                    outerCircle.setAttribute("stroke-width", "3");
+                    outerCircle.classList.add("node-pulse");
+                } else if (isEnd) {
+                    outerCircle.setAttribute("r", "10");
+                    outerCircle.setAttribute("fill", "#ff4757");
+                    outerCircle.setAttribute("stroke", "#ff6b81");
+                    outerCircle.setAttribute("stroke-width", "3");
+                    outerCircle.classList.add("node-pulse");
+                } else if (isOnPath) {
+                    outerCircle.setAttribute("r", "8");
+                    outerCircle.setAttribute("fill", "none");
+                    outerCircle.setAttribute("stroke", "#6c63ff");
+                    outerCircle.setAttribute("stroke-width", "3");
+                } else {
+                    // Default: red circle outline like the PNG image
+                    outerCircle.setAttribute("r", "7");
+                    outerCircle.setAttribute("fill", "none");
+                    outerCircle.setAttribute("stroke", "#e74c3c");
+                    outerCircle.setAttribute("stroke-width", "2");
+                }
+
+                svg.appendChild(outerCircle);
+
+                // Label (blue like the image)
+                const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                text.setAttribute("x", node.x);
+                text.setAttribute("y", node.y - 16);
+                text.setAttribute("text-anchor", "middle");
+                text.setAttribute("fill", isOnPath ? "#fff" : "#5599dd");
+                text.setAttribute("font-size", isOnPath ? "11" : "9");
+                text.setAttribute("font-family", "Inter, sans-serif");
+                text.setAttribute("font-weight", isOnPath ? "700" : "500");
+                text.textContent = node.label;
+                svg.appendChild(text);
+            }
+
+            // Draw staircase arrows for stair-type nodes
+            for (const node of fNodes) {
+                if (node.type === "stairs" && node.label.toLowerCase().includes("stair")) {
+                    drawStairArrow(svg, node.x, node.y);
+                }
+            }
+        }
+
+        function createLine(x1, y1, x2, y2, color, width) {
+            const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+            line.setAttribute("x1", x1);
+            line.setAttribute("y1", y1);
+            line.setAttribute("x2", x2);
+            line.setAttribute("y2", y2);
+            line.setAttribute("stroke", color);
+            line.setAttribute("stroke-width", width);
+            line.setAttribute("stroke-linecap", "round");
+            return line;
+        }
+
+        function drawStairArrow(svg, x, y) {
+            // Small upward arrow to indicate stairs
+            const arrow = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            arrow.setAttribute("d", `M${x-8},${y+20} L${x},${y+8} L${x+8},${y+20}`);
+            arrow.setAttribute("stroke", "#e74c3c");
+            arrow.setAttribute("stroke-width", "2");
+            arrow.setAttribute("fill", "none");
+            svg.appendChild(arrow);
+        }
+
+        async function findPath() {
+            const srcKey = document.getElementById("source").value;
+            const dstKey = document.getElementById("destination").value;
+            const errEl = document.getElementById("errorMsg");
+            const resultEl = document.getElementById("resultCard");
+
+            errEl.classList.remove("active");
+            resultEl.classList.remove("active");
+            lastResult = null;
+
+            if (!srcKey || !dstKey) {
+                errEl.textContent = "Please select both source and destination.";
+                errEl.classList.add("active");
+                return;
+            }
+
+            // Use stable node keys for routing and keep labels only for display.
+            const srcLabel = document.getElementById("source").selectedOptions[0]?.text || srcKey;
+            const dstLabel = document.getElementById("destination").selectedOptions[0]?.text || dstKey;
+
+            const res = await fetch("/api/find-path", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    source: srcLabel,
+                    destination: dstLabel,
+                    source_key: srcKey,
+                    destination_key: dstKey,
+                }),
+            });
+
+            const data = await res.json();
+
+            // Show debug info
+            const debugPanel = document.getElementById("debug-info");
+            const debugContent = document.getElementById("debug-content");
+            if (debugPanel && debugContent) {
+                debugPanel.style.display = "block";
+                debugContent.innerText = JSON.stringify({
+                    is_campus: data.is_campus,
+                    nodes_received: data.path_nodes?.length,
+                    first_node: data.path_nodes?.[0],
+                    success: data.success,
+                    error: data.error
+                }, null, 2);
+            }
+            if (!res.ok || data.error) {
+                const errMsg = data.error || "Something went wrong.";
+                errEl.textContent = errMsg;
+                errEl.classList.add("active");
+                speakText(`Error: ${errMsg}`);
+                return;
+            }
+
+            lastResult = data;
+
+            // Stats
+            document.getElementById("totalSteps").textContent = data.total_steps;
+            document.getElementById("totalDist").textContent = data.total_distance_m;
+            document.getElementById("resultCard").classList.add("active");
+
+            if (data.is_campus) {
+                switchMapView("campus");
+                drawCampusPath(data.path_nodes, data.alt_paths);
+            } else {
+                switchMapView("building");
+                activeFloor = data.path_nodes[0].floor_id;
+                document.querySelectorAll(".floor-tab").forEach(t => {
+                    t.classList.toggle("active", t.dataset.fid === activeFloor);
+                });
+                document.getElementById("mapTitle").textContent = `🗺️ ${activeFloor === "GF" ? "Ground" : activeFloor === "1F" ? "First" : "Second"} Floor`;
+                renderMap();
+            }
+
+            // Generate Narrative Guide
+            generateNarrative(data.segments, data.total_steps, data.total_distance_m);
+
+            const segList = document.getElementById("segmentList");
+            segList.innerHTML = "";
+            for (const seg of data.segments) {
+                const div = document.createElement("div");
+                div.className = "segment";
+                let noteHtml = seg.note ? `<div class="seg-note">📌 ${seg.note}</div>` : "";
+                let floorTag = seg.from_floor !== seg.to_floor
+                    ? `<span style="color:#e74c3c;font-size:0.7rem;"> 🔄 Floor change</span>` : "";
+                div.innerHTML = `
+                    <div class="seg-num">${seg.step}</div>
+                    <div>
+                        <div class="seg-text">${seg.instruction}${floorTag}</div>
+                        <div class="seg-meta">${seg.steps} steps · ${seg.distance_m}m</div>
+                        ${noteHtml}
+                    </div>
+                `;
+                segList.appendChild(div);
+            }
+
+            resultEl.classList.add("active");
+            document.getElementById("speakBtn").style.display = "block";
+
+            // Switch to the source floor
+            const srcFloor = data.path_nodes[0]?.floor_id;
+            if (srcFloor && srcFloor !== activeFloor) {
+                switchFloor(srcFloor);
+            } else {
+                renderMap();
+            }
+        }
+
+        const deepgramVoices = [
+            { id: "aura-asteria-en", name: "Asteria (US Female)" },
+            { id: "aura-luna-en", name: "Luna (US Female)" },
+            { id: "aura-stella-en", name: "Stella (US Female)" },
+            { id: "aura-athena-en", name: "Athena (UK Female)" },
+            { id: "aura-hera-en", name: "Hera (US Female)" },
+            { id: "aura-orion-en", name: "Orion (US Male)" },
+            { id: "aura-arcas-en", name: "Arcas (US Male)" },
+            { id: "aura-perseus-en", name: "Perseus (US Male)" },
+            { id: "aura-angus-en", name: "Angus (Irish Male)" },
+            { id: "aura-orpheus-en", name: "Orpheus (US Male)" },
+            { id: "aura-helios-en", name: "Helios (UK Male)" },
+            { id: "aura-zeus-en", name: "Zeus (US Male)" }
+        ];
+
+        const gttsVoices = [
+            { id: "co.in", name: "🇮🇳 Indian English" },
+            { id: "co.uk", name: "🇬🇧 British English" },
+            { id: "com", name: "🇺🇸 American English" },
+            { id: "com.au", name: "🇦🇺 Australian English" },
+            { id: "co.za", name: "🇿🇦 South African English" },
+        ];
+
+        let browserVoices = [];
+
+        function loadBrowserVoices() {
+            browserVoices = window.speechSynthesis.getVoices();
+            if (document.getElementById("ttsEngine").value === "browser") {
+                updateVoiceList();
+            }
+        }
+
+        if (speechSynthesis.onvoiceschanged !== undefined) {
+            speechSynthesis.onvoiceschanged = loadBrowserVoices;
+        }
+
+        function updateVoiceList() {
+            const engine = document.getElementById("ttsEngine").value;
+            const voiceSelect = document.getElementById("ttsVoice");
+            voiceSelect.innerHTML = "";
+
+            if (engine === "deepgram") {
+                deepgramVoices.forEach(v => {
+                    const option = new Option(v.name, v.id);
+                    voiceSelect.add(option);
+                });
+            } else if (engine === "gtts") {
+                gttsVoices.forEach(v => {
+                    const option = new Option(v.name, v.id);
+                    voiceSelect.add(option);
+                });
+            } else {
+                if (browserVoices.length === 0) {
+                    voiceSelect.add(new Option("Loading voices...", ""));
+                    return;
+                }
+                const isEnglish = (v) => v.lang.startsWith('en');
+                const englishVoices = browserVoices.filter(isEnglish);
+                const voicesToShow = englishVoices.length > 0 ? englishVoices : browserVoices;
+
+                voicesToShow.forEach((v, index) => {
+                    const option = new Option(`${v.name} (${v.lang})`, index);
+                    if (v.lang === 'en-IN') option.selected = true;
+                    voiceSelect.add(option);
+                });
+            }
+        }
+
+        // Initialize voice list
+        updateVoiceList();
+        setTimeout(loadBrowserVoices, 500);
+
+        let currentDeepgramAudio = null;
+
+        function speakRoute() {
+            if (!lastResult) return;
+            speakText(lastResult.voice_script);
+        }
+
+        async function speakText(text) {
+            stopSpeaking();
+            document.getElementById("stopSpeakBtn").style.display = "block";
+
+            const engine = document.getElementById("ttsEngine").value;
+
+            if (engine === "deepgram" || engine === "gtts") {
+                const speakBtn = document.getElementById("speakBtn");
+                const oldText = speakBtn.textContent;
+                speakBtn.textContent = "⏳ Generating...";
+
+                let apiUrl, bodyPayload;
+                if (engine === "deepgram") {
+                    const model = document.getElementById("ttsVoice").value || "aura-athena-en";
+                    apiUrl = "/api/tts";
+                    bodyPayload = { text, model };
+                } else {
+                    const tld = document.getElementById("ttsVoice").value || "co.in";
+                    apiUrl = "/api/tts-gtts";
+                    bodyPayload = { text, tld };
+                }
+
+                try {
+                    const res = await fetch(apiUrl, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(bodyPayload)
+                    });
+
+                    if (!res.ok) {
+                        const err = await res.json();
+                        alert("TTS Error: " + (err.error || res.statusText));
+                        speakBtn.textContent = oldText;
+                        document.getElementById("stopSpeakBtn").style.display = "none";
+                        return;
+                    }
+
+                    const audioBlob = await res.blob();
+                    const audioUrl = URL.createObjectURL(audioBlob);
+                    currentDeepgramAudio = new Audio(audioUrl);
+                    currentDeepgramAudio.onended = () => {
+                        document.getElementById("stopSpeakBtn").style.display = "none";
+                        speakBtn.textContent = oldText;
+                    };
+                    await currentDeepgramAudio.play();
+                    speakBtn.textContent = oldText;
+                } catch (e) {
+                    console.error("Audio fetch error:", e);
+                    alert("Failed to play audio.");
+                    speakBtn.textContent = oldText;
+                    document.getElementById("stopSpeakBtn").style.display = "none";
+                }
+            } else {
+                const u = new SpeechSynthesisUtterance(text);
+                const voiceIndex = document.getElementById("ttsVoice").value;
+                if (voiceIndex && browserVoices[voiceIndex]) {
+                    u.voice = browserVoices[voiceIndex];
+                }
+                u.rate = 1.0;
+                u.pitch = 1;
+                u.onend = () => {
+                    document.getElementById("stopSpeakBtn").style.display = "none";
+                }
+                speechSynthesis.speak(u);
+            }
+        }
+
+        function stopSpeaking() {
+            if (currentDeepgramAudio) {
+                currentDeepgramAudio.pause();
+                currentDeepgramAudio.currentTime = 0;
+                currentDeepgramAudio = null;
+            }
+            speechSynthesis.cancel();
+            document.getElementById("stopSpeakBtn").style.display = "none";
+        }
+
+        /* Campus Map Functions */
+        async function initCampusMap() {
+            try {
+                const res = await fetch("/api/campus-map-data");
+                campusMapData = await res.json();
+
+                // Initialize map centered on campus
+                campusMap = L.map('campus-map').setView([23.0375, 72.545], 16);
+
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    maxZoom: 19,
+                    attribution: '© OpenStreetMap contributors'
+                }).addTo(campusMap);
+
+                // Add markers for important campus nodes
+                Object.entries(campusMapData.nodes).forEach(([name, coords]) => {
+                    if (isNaN(name)) { // Only show named nodes as markers by default
+                        const marker = L.marker([coords[0], coords[1]])
+                            .bindPopup(`<b>${name}</b>`)
+                            .addTo(campusMap);
+                        campusMarkers.push(marker);
+                    }
+                });
+
+            } catch (e) {
+                console.error("Failed to initialize campus map:", e);
+            }
+        }
+
+        function switchMapView(view) {
+            activeMapView = view;
+
+            const buildingBtn = document.getElementById("btnBuildingMap");
+            const campusBtn = document.getElementById("btnCampusMap");
+            const buildingView = document.getElementById("buildingMapView");
+            const campusView = document.getElementById("campusMapView");
+            const floorTabs = document.getElementById("floorTabs");
+            const mapTitle = document.getElementById("mapTitle");
+            const legend = document.getElementById("legend");
+
+            if (view === "building") {
+                buildingBtn.classList.add("active");
+                campusBtn.classList.remove("active");
+                buildingView.classList.remove("hidden");
+                campusView.classList.add("hidden");
+                floorTabs.classList.remove("hidden");
+                legend.classList.remove("hidden");
+                mapTitle.textContent = `🗺️ ${activeFloor === "GF" ? "Ground" : activeFloor === "1F" ? "First" : "Second"} Floor`;
+                renderMap();
+            } else {
+                buildingBtn.classList.remove("active");
+                campusBtn.classList.add("active");
+                buildingView.classList.add("hidden");
+                campusView.classList.remove("hidden");
+                floorTabs.classList.add("hidden");
+                legend.classList.add("hidden");
+                mapTitle.textContent = "🗺️ Gujarat University Campus";
+
+                // Leaflet needs an invalidateSize call when container becomes visible
+                setTimeout(() => {
+                    if (campusMap) campusMap.invalidateSize();
+                }, 100);
+            }
+        }
+
+        let campusPathGroup = null;
+
+        function drawCampusPath(pathNodes, altPaths = []) {
+            console.log("PATH DRAW: All nodes in path", pathNodes);
+
+            if (!campusMap) {
+                console.error("Campus Map not found!");
+                return;
+            }
+
+            // 1. Clear existing paths
+            if (campusPathGroup) {
+                campusMap.removeLayer(campusPathGroup);
+            }
+            campusPathGroup = L.featureGroup().addTo(campusMap);
+
+            campusMarkers.forEach(m => campusMap.removeLayer(m));
+            campusMarkers = [];
+
+            if (!pathNodes || pathNodes.length < 2) return;
+
+            // 2. Draw Alternative Paths (under primary)
+            const altColors = ['#2979FF', '#FF9100']; // Blue, Orange
+            if (altPaths && altPaths.length > 0) {
+                altPaths.forEach((altData, idx) => {
+                    const altLatLons = altData
+                        .filter(n => n.lat && n.lon)
+                        .map(n => [parseFloat(n.lat), parseFloat(n.lon)]);
+
+                    if (altLatLons.length > 1) {
+                        const cIdx = Math.min(idx, altColors.length - 1);
+                        const layer = L.polyline(altLatLons, {
+                            color: altColors[cIdx],
+                            weight: 6,
+                            opacity: 0.8,
+                            dashArray: '5, 10', // Dashed line to indicate alternative
+                            lineJoin: 'round',
+                            renderer: L.canvas()
+                        });
+                        campusPathGroup.addLayer(layer);
+                    }
+                });
+            }
+
+            // 3. Draw Primary Path Line
+            const latLons = pathNodes
+                .filter(n => n.lat && n.lon)
+                .map(n => [parseFloat(n.lat), parseFloat(n.lon)]);
+
+            if (latLons.length > 1) {
+                const primaryLayer = L.polyline(latLons, {
+                    color: '#00C853', // Green
+                    weight: 8,
+                    opacity: 1.0,
+                    lineJoin: 'round',
+                    renderer: L.canvas()
+                });
+                campusPathGroup.addLayer(primaryLayer);
+
+                // 4. Draw ALL Waypoints
+                pathNodes.forEach((node, idx) => {
+                    const isEdge = (idx === 0 || idx === pathNodes.length - 1);
+                    const wp = L.circleMarker([node.lat, node.lon], {
+                        radius: isEdge ? 8 : 4,
+                        color: isEdge ? '#fff' : '#00d2a0',
+                        fillColor: isEdge ? (idx === 0 ? '#ff4757' : '#6c63ff') : '#fff',
+                        fillOpacity: 1,
+                        weight: 2
+                    }).addTo(campusMap);
+
+                    wp.bindTooltip(node.label, { permanent: false, direction: 'top' });
+                    campusMarkers.push(wp);
+
+                    // Add full marker for start/end
+                    if (isEdge) {
+                        const m = L.marker([node.lat, node.lon]).addTo(campusMap)
+                            .bindPopup(`<b>${idx === 0 ? 'START' : 'DESTINATION'}:</b><br>${node.label}`);
+                        if (idx === 0) m.openPopup();
+                        campusMarkers.push(m);
+                    }
+                });
+
+                // 5. Fit bounds to all generated paths
+                campusMap.fitBounds(campusPathGroup.getBounds(), { padding: [80, 80] });
+
+                setTimeout(() => {
+                    campusMap.invalidateSize();
+                }, 400);
+            }
+        }
+
+        async function generateNarrative(segments, totalSteps, totalMeters) {
+            const card = document.getElementById("narrativeCard");
+            const textEl = document.getElementById("narrativeText");
+            card.classList.add("active");
+            textEl.innerHTML = '<span style="color: var(--text-dim)">✨ Thinking...</span>';
+
+            try {
+                const res = await fetch("/api/generate-narrative", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        segments: segments,
+                        total_steps: totalSteps,
+                        total_meters: totalMeters
+                    })
+                });
+                const data = await res.json();
+                if (data.narrative) {
+                    textEl.textContent = data.narrative;
+                    // Auto-speak if it's a voice search result
+                    if (voiceStatus.textContent.includes("Route found")) {
+                        speakText(data.narrative);
+                    }
+                } else {
+                    textEl.textContent = "Could not generate narrative.";
+                    if (voiceStatus.textContent.includes("Route found")) {
+                        speakText("I found the route, but I couldn't generate a natural description. You can see the steps in the list.");
+                    }
+                }
+            } catch (e) {
+                console.error("Narrative error:", e);
+                textEl.textContent = "Error connecting to AI guide.";
+            }
+        }
+
+        document.getElementById("speakNarrativeBtn").onclick = () => {
+            const text = document.getElementById("narrativeText").textContent;
+            speakText(text);
+        };
+
+        init();
+    </script>
+</body>
+</html>
